@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "New agenda",
+        "description": "One agenda per room or device. Events, repetitions and the devices it controls are set in the Agenda panel.",
+        "data": {
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "empty": "The name cannot be empty."
+    },
+    "abort": {
+      "already_configured": "An agenda with this name already exists."
+    }
+  },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Active"
+      }
+    },
+    "sensor": {
+      "current": {
+        "name": "Now"
+      },
+      "next_change": {
+        "name": "Next change"
+      }
+    }
+  },
+  "services": {
+    "resync": {
+      "name": "Resynchronise",
+      "description": "Brings the devices controlled by the agenda back to the state it wants now."
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nouvel agenda",
+        "description": "Un agenda par pièce ou par appareil. Les événements, les répétitions et les appareils commandés se règlent dans le panneau Agenda.",
+        "data": {
+          "name": "Nom"
+        }
+      }
+    },
+    "error": {
+      "empty": "Le nom ne peut pas être vide."
+    },
+    "abort": {
+      "already_configured": "Un agenda porte déjà ce nom."
+    }
+  },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Actif"
+      }
+    },
+    "sensor": {
+      "current": {
+        "name": "En ce moment"
+      },
+      "next_change": {
+        "name": "Prochain changement"
+      }
+    }
+  },
+  "services": {
+    "resync": {
+      "name": "Resynchroniser",
+      "description": "Remet les appareils commandés par l'agenda dans l'état qu'il veut maintenant."
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "domain": "agenda",
+  "name": "Agenda",
+  "codeowners": [
+    "@jolabs40"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/jolabs40/agenda-ha",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/jolabs40/agenda-ha/issues",
+  "requirements": [
+    "holidays>=0.50"
+  ],
+  "version": "0.2.0"
+}

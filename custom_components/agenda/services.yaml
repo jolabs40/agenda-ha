@@ -1,0 +1,5 @@
+resync:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
