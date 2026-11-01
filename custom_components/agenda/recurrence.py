@@ -20,8 +20,9 @@ Event shape (missing fields take their default value):
         "exclude": ["2026-11-11"],    # days without an occurrence
         "include": ["2026-12-24"],    # days added on top of the rule
         "holidays": "ignore" | "exclude" | "only",
-        "calendar": "calendar.school_holidays" | null,
-        "calendar_mode": "exclude" | "only"
+        "calendar": "calendar.trips" | null,
+        "calendar_mode": "exclude" | "only",
+        "period": "always" | "school" | "vacation"   # against the shared school calendar
       },
       "state": {...} | null           # what linked entities should be (see devices.py)
     }
@@ -51,6 +52,11 @@ CALENDAR_EXCLUDE = "exclude"
 CALENDAR_ONLY = "only"
 CALENDAR_MODES = (CALENDAR_EXCLUDE, CALENDAR_ONLY)
 
+PERIOD_ALWAYS = "always"
+PERIOD_SCHOOL = "school"
+PERIOD_VACATION = "vacation"
+PERIODS = (PERIOD_ALWAYS, PERIOD_SCHOOL, PERIOD_VACATION)
+
 ONE_DAY = timedelta(days=1)
 
 
@@ -65,6 +71,8 @@ class Context:
     is_holiday: Callable[[date], bool] = _no_holiday
     # local days on which a calendar has at least one event, by entity id
     calendar_days: Mapping[str, Set[date]] = field(default_factory=dict)
+    # school holiday days, or None when no school calendar is set
+    vacation_days: Set[date] | None = None
 
 
 NO_CONTEXT = Context()
@@ -86,7 +94,7 @@ class Occurrence:
 
 
 def parse_point(value: str) -> datetime:
-    """ "2026-11-02" or "2026-11-02T21:30[:00]" -> naive datetime."""
+    """Parse "2026-11-02" or "2026-11-02T21:30[:00]" into a naive datetime."""
     value = value.strip()
     if len(value) == 10:
         return datetime.combine(date.fromisoformat(value), datetime.min.time())
@@ -123,6 +131,8 @@ def validate_event(event: dict[str, Any]) -> None:
         raise ValueError("unknown public holiday setting")
     if repeat.get("calendar") and repeat.get("calendar_mode", CALENDAR_EXCLUDE) not in CALENDAR_MODES:
         raise ValueError("unknown calendar condition")
+    if repeat.get("period", PERIOD_ALWAYS) not in PERIODS:
+        raise ValueError("unknown period")
     for key in ("exclude", "include"):
         for day in repeat.get(key) or []:
             date.fromisoformat(day)
@@ -179,9 +189,15 @@ def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bo
     calendar = repeat.get("calendar")
     if calendar:
         busy = day in ctx.calendar_days.get(calendar, ())
-        if repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY:
-            return busy
-        return not busy
+        if busy != (repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY):
+            return False
+
+    period = repeat.get("period", PERIOD_ALWAYS)
+    if period != PERIOD_ALWAYS:
+        # without a school calendar no day is known as a school holiday
+        vacation = ctx.vacation_days is not None and day in ctx.vacation_days
+        if vacation != (period == PERIOD_VACATION):
+            return False
     return True
 
 
@@ -292,6 +308,8 @@ def calendar_days(events: Iterable[tuple[str, str]], tz: tzinfo) -> set[date]:
         if len(start) == 10:
             first = date.fromisoformat(start)
             stop = date.fromisoformat(end) if len(end) == 10 else first + ONE_DAY
+            # some published calendars give one-day events an end equal to their start
+            stop = max(stop, first + ONE_DAY)
         else:
             begin = datetime.fromisoformat(start).astimezone(tz)
             finish = datetime.fromisoformat(end).astimezone(tz)

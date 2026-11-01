@@ -31,7 +31,10 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   On peut retirer ou ajouter des jours à une série.
 - Les jours fériés du pays peuvent être sautés, ou être les seuls jours retenus.
 - N'importe quel calendrier peut servir de condition : sauter les jours où il a un événement
-  (vacances scolaires, absences) ou ne garder que ceux-là.
+  (déplacements, absences) ou ne garder que ceux-là.
+- Un calendrier des vacances scolaires se choisit une fois pour tous les agendas. Chaque événement
+  répété s'applique alors toujours, seulement en période scolaire ou seulement pendant les
+  vacances, et la vue Semaine signale les vacances.
 - Des actions de début et de fin par événement, avec l'éditeur d'actions habituel de Home Assistant.
 - Pour chaque agenda : une entité `calendar` (panneau Calendrier, déclencheurs de calendrier), un
   interrupteur Actif qui le suspend, les capteurs En ce moment et Prochain changement, et l'action
@@ -108,6 +111,18 @@ Ils suivent le pays réglé dans Paramètres > Système > Général. Un autre pa
 (Alsace-Moselle, outre-mer...), se choisit dans les réglages de n'importe quel agenda et vaut pour
 tous.
 
+## Vacances scolaires
+
+Ajouter un calendrier des vacances, par exemple avec l'intégration Remote Calendar et le
+calendrier officiel de sa zone, puis le choisir dans les réglages communs de n'importe quel
+agenda. Le ministère en publie un par zone :
+`https://fr.ftp.opendatasoft.com/openscol/fr-en-calendrier-scolaire/Zone-A.ics` (ou `Zone-B`,
+`Zone-C`, `Corse`).
+
+Pour un enfant interne la semaine, par exemple : marquer ses plages de semaine en Période
+scolaire, et ajouter un événement d'une journée entière, tous les jours, à la température de la
+maison, marqué Vacances scolaires.
+
 ## Carte de tableau de bord
 
 ```yaml
@@ -124,6 +139,14 @@ agenda: Chambre
 ```
 
 Un clic sur la carte ouvre le panneau.
+
+## Soutenir le projet
+
+Agenda est gratuit. S'il vous rend service, vous pouvez m'offrir un café sur [Ko-fi](https://ko-fi.com/jolabs40).
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jolabs40)
+
+Une étoile sur ce dépôt aide aussi d'autres personnes à le trouver.
 
 ## Licence
 

@@ -58,6 +58,7 @@ REPEAT_SCHEMA = vol.Schema(
         vol.Optional("holidays", default=recurrence.HOLIDAYS_IGNORE): vol.In(recurrence.HOLIDAYS_MODES),
         vol.Optional("calendar", default=None): vol.Any(None, cv.entity_domain("calendar")),
         vol.Optional("calendar_mode", default=recurrence.CALENDAR_EXCLUDE): vol.In(recurrence.CALENDAR_MODES),
+        vol.Optional("period", default=recurrence.PERIOD_ALWAYS): vol.In(recurrence.PERIODS),
     }
 )
 
@@ -136,7 +137,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_set_enabled,
         ws_resync,
         ws_holiday_options,
-        ws_save_holidays,
+        ws_save_shared,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -150,7 +151,7 @@ def ws_list(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg
         {
             "time_zone": str(dt_util.get_default_time_zone()),
             "now": dt_util.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            "holidays": _shared(hass).as_dict(),
+            "shared": _shared(hass).as_dict(),
             "agendas": [agenda.as_dict() for agenda in agendas],
         },
     )
@@ -176,7 +177,11 @@ async def ws_occurrences(hass: HomeAssistant, connection: websocket_api.ActiveCo
     agendas = {entry_id: await agenda.async_occurrences_dict(start, end) for entry_id, agenda in _agendas(hass).items()}
     connection.send_result(
         msg["id"],
-        {"agendas": agendas, "holidays": _shared(hass).between(start.date(), end.date())},
+        {
+            "agendas": agendas,
+            "holidays": _shared(hass).between(start.date(), end.date()),
+            "vacation": await _shared(hass).async_vacation_between(start.date(), end.date()),
+        },
     )
 
 
@@ -315,13 +320,14 @@ async def ws_resync(hass: HomeAssistant, connection: websocket_api.ActiveConnect
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "agenda/holidays/save",
+        vol.Required("type"): "agenda/shared/save",
         vol.Optional("country", default=None): vol.Any(None, vol.All(str, vol.Length(min=2, max=3))),
         vol.Optional("subdiv", default=None): vol.Any(None, str),
+        vol.Optional("school_calendar", default=None): vol.Any(None, cv.entity_domain("calendar")),
     }
 )
 @websocket_api.async_response
-async def ws_save_holidays(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+async def ws_save_shared(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def run():
         shared = _shared(hass)
         country = msg["country"]
@@ -329,7 +335,7 @@ async def ws_save_holidays(hass: HomeAssistant, connection: websocket_api.Active
             options = await shared.async_options(country)
             if country not in options["countries"]:
                 raise HomeAssistantError(f"unknown country: {country}")
-        await shared.async_set(country, msg["subdiv"])
+        await shared.async_set(country, msg["subdiv"], msg["school_calendar"])
         for agenda in _agendas(hass).values():
             await agenda.async_context_changed()
 

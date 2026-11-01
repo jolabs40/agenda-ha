@@ -108,6 +108,7 @@ class AgendaCard extends HTMLElement {
       });
       this._occ = res.agendas || {};
       this._holidays = res.holidays || {};
+      this._vacation = res.vacation || {};
       this._error = null;
     } catch (err) {
       this._error = err.message || String(err);
@@ -130,6 +131,7 @@ class AgendaCard extends HTMLElement {
         agendas: this._agendas(),
         occ: this._occ || {},
         holidays: this._holidays || {},
+        vacation: this._vacation || {},
         now,
         editable: false,
       };
@@ -158,6 +160,7 @@ const CARD_STYLES = `
     --agenda-hover: color-mix(in srgb, var(--primary-text-color) 7%, transparent);
     --agenda-track: color-mix(in srgb, var(--primary-text-color) 5%, transparent);
     --agenda-holiday: var(--error-color, #db4437);
+    --agenda-vacation: #43a047;
   }
   ha-card { cursor: pointer; overflow: hidden; }
   .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px; font-size: 18px; font-weight: 500; }

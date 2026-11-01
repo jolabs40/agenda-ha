@@ -170,6 +170,7 @@ export function eventEditor(host, opts) {
     holidays: "ignore",
     calendar: null,
     calendar_mode: "exclude",
+    period: "always",
     ...(ev.repeat || {}),
   };
   ev.start_actions = ev.start_actions || [];
@@ -335,7 +336,14 @@ export function eventEditor(host, opts) {
                 <label class="fld sm"><span>${esc(T.until)}</span><input type="date" class="inp" data-r="until" value="${r.until || ""}"></label>
                 <label class="fld sm"><span>${esc(T.holidays)}</span><select class="inp" data-r="holidays">
                   ${["ignore", "exclude", "only"].map((h) => `<option value="${h}" ${r.holidays === h ? "selected" : ""}>${esc(T[`holidays_${h}`])}</option>`).join("")}
-                </select></label></div>`
+                </select></label>
+                ${
+                  opts.shared?.school_calendar || r.period !== "always"
+                    ? `<label class="fld sm"><span>${esc(T.period)}</span><select class="inp" data-r="period">
+                  ${["always", "school", "vacation"].map((p) => `<option value="${p}" ${r.period === p ? "selected" : ""}>${esc(T.periods[p])}</option>`).join("")}
+                </select></label>`
+                    : ""
+                }</div>`
             : ""
         }</div>`;
       sec.querySelectorAll("[data-r]").forEach((inp) =>
@@ -573,16 +581,21 @@ const regionName = (code, lang) => {
   }
 };
 
-/** opts: { hass, T, agenda, holidays, ws, callApi }; holidays comes from agenda/list. */
-export function settingsEditor(host, { hass, T, agenda, holidays, ws, callApi }) {
+/** opts: { hass, T, agenda, shared, ws, callApi }; shared comes from agenda/list. */
+export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
   const cfg = structuredClone(agenda.settings);
   cfg.kind = cfg.kind || "none";
   cfg.entities = cfg.entities || [];
   const initialKind = cfg.kind;
   let name = agenda.name;
   let filter = "";
-  const hol = { country: holidays?.configured || null, subdiv: holidays?.subdiv || null, options: null };
-  const holInitial = JSON.stringify([hol.country, hol.subdiv]);
+  const hol = {
+    country: shared?.configured || null,
+    subdiv: shared?.subdiv || null,
+    school: shared?.school_calendar || null,
+    options: null,
+  };
+  const holInitial = JSON.stringify([hol.country, hol.subdiv, hol.school]);
   const dlg = new Dialog(host, { title: `${T.settings} · ${agenda.name}`, wide: true });
 
   const body = `<label class="fld"><span>${esc(T.name)}</span><input class="inp" data-name value="${esc(name)}"></label>
@@ -706,7 +719,7 @@ export function settingsEditor(host, { hass, T, agenda, holidays, ws, callApi })
     async holidays() {
       const sec = dlg.$('[data-sec="holidays"]');
       const lang = T._lang;
-      const haCountry = holidays?.ha_country;
+      const haCountry = shared?.ha_country;
       const country = hol.country || haCountry;
       if (!hol.options || hol.options.for !== country) {
         try {
@@ -731,7 +744,20 @@ export function settingsEditor(host, { hass, T, agenda, holidays, ws, callApi })
           </select></label>`
               : ""
           }
-        </div>`;
+        </div>
+        <label class="fld"><span>${esc(T.school_calendar)}</span><select class="inp" data-school>
+          <option value="">${esc(T.none)}</option>
+          ${Object.values(hass.states)
+            .filter((x) => x.entity_id.startsWith("calendar."))
+            .sort((a, b) => friendlyName(hass, a.entity_id).localeCompare(friendlyName(hass, b.entity_id)))
+            .map(
+              (c) =>
+                `<option value="${esc(c.entity_id)}" ${hol.school === c.entity_id ? "selected" : ""}>${esc(friendlyName(hass, c.entity_id))}</option>`,
+            )
+            .join("")}
+        </select></label>
+        <p class="hint">${esc(T.school_calendar_hint)}</p>`;
+      sec.querySelector("[data-school]").addEventListener("change", (x) => (hol.school = x.target.value || null));
       sec.querySelector("[data-country]").addEventListener("change", (x) => {
         hol.country = x.target.value || null;
         hol.subdiv = null;
@@ -759,8 +785,13 @@ export function settingsEditor(host, { hass, T, agenda, holidays, ws, callApi })
         resync_on_start: !!cfg.resync_on_start,
       },
     });
-    if (JSON.stringify([hol.country, hol.subdiv]) !== holInitial) {
-      await ws({ type: "agenda/holidays/save", country: hol.country, subdiv: hol.subdiv });
+    if (JSON.stringify([hol.country, hol.subdiv, hol.school]) !== holInitial) {
+      await ws({
+        type: "agenda/shared/save",
+        country: hol.country,
+        subdiv: hol.subdiv,
+        school_calendar: hol.school,
+      });
     }
   };
   dlg.$("[data-save]").addEventListener("click", () =>

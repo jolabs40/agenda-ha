@@ -45,7 +45,8 @@ export function fitLabels(root) {
 }
 
 /**
- * ctx: { hass, T, agendas, occ: {entry_id: [occ]}, holidays: {day: name}, firstDay, days, now, hourH, editable }
+ * ctx: { hass, T, agendas, occ: {entry_id: [occ]}, holidays: {day: name}, vacation: {day: name},
+ *        firstDay, days, now, hourH, editable }
  */
 export function renderWeek(ctx) {
   const { hass, T, agendas, firstDay, days, now, hourH, editable } = ctx;
@@ -55,14 +56,23 @@ export function renderWeek(ctx) {
   const dayList = Array.from({ length: days }, (_, i) => firstDay + i * DAY);
 
   const holidays = ctx.holidays || {};
+  const vacation = ctx.vacation || {};
   const head = dayList
-    .map((d) => {
+    .map((d, i) => {
       const isToday = d === today;
       const holiday = holidays[wallDate(d)];
-      return `<div class="wk-day ${isToday ? "today" : ""} ${holiday ? "holiday" : ""}" ${holiday ? `title="${esc(holiday)}"` : ""}>
+      const school = vacation[wallDate(d)];
+      const onVacation = school !== undefined;
+      // name the school holidays once, on their first day in view
+      const vacationStarts = onVacation && (i === 0 || vacation[wallDate(d - DAY)] === undefined);
+      const tip = [holiday, onVacation ? school || T.vacation : null].filter(Boolean).join(" · ");
+      let note = "";
+      if (holiday) note = `<span class="wk-hol">${esc(holiday)}</span>`;
+      else if (vacationStarts) note = `<span class="wk-vac">${esc(school || T.vacation)}</span>`;
+      return `<div class="wk-day ${isToday ? "today" : ""} ${holiday ? "holiday" : ""} ${onVacation ? "vacation" : ""}" ${tip ? `title="${esc(tip)}"` : ""}>
         <span class="wk-dname">${esc(fmtDay(d, lang, { weekday: "short" }))}</span>
         <span class="wk-dnum">${esc(fmtDay(d, lang, { day: "numeric" }))}</span>
-        ${holiday ? `<span class="wk-hol">${esc(holiday)}</span>` : ""}
+        ${note}
       </div>`;
     })
     .join("");
@@ -263,6 +273,8 @@ export const VIEW_STYLES = `
   .wk-day { min-width: 0; }
   .wk-hol { font-size: 10px; line-height: 1.2; color: var(--agenda-holiday); max-width: calc(100% - 6px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .wk-day.holiday .wk-dname { color: var(--agenda-holiday); }
+  .wk-day.vacation { box-shadow: inset 0 -3px 0 var(--agenda-vacation); }
+  .wk-vac { font-size: 10px; line-height: 1.2; color: var(--agenda-vacation); max-width: calc(100% - 6px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .wk-body { display: grid; grid-template-columns: var(--gutter) 1fr; position: relative; }
   .wk-hours .wk-h { height: var(--hour-h); position: relative; }
   .wk-hours .wk-h span { position: absolute; top: -7px; right: 6px; font-size: 10.5px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }

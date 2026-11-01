@@ -16,6 +16,7 @@ const TEXTS = {
     new_agenda: "Nouvel agenda",
     agenda_name: "Nom de l'agenda",
     settings: "Réglages",
+    support: "Soutenir Agenda sur Ko-fi",
     active: "Actif",
     paused: "Suspendu",
     now: "En ce moment",
@@ -107,7 +108,13 @@ const TEXTS = {
     resync_on_start: "Recaler les appareils au démarrage de Home Assistant",
     resync_now: "Appliquer maintenant",
     delete_agenda: "Supprimer l'agenda",
-    holidays_title: "Jours fériés (tous les agendas)",
+    holidays_title: "Réglages communs (tous les agendas)",
+    school_calendar: "Calendrier des vacances scolaires",
+    school_calendar_hint:
+      "Les événements répétés peuvent alors ne s'appliquer qu'en période scolaire ou que pendant les vacances.",
+    period: "Période",
+    periods: { always: "Toujours", school: "Période scolaire", vacation: "Vacances scolaires" },
+    vacation: "Vacances scolaires",
     country: "Pays",
     subdivision: "Région",
     ha_country: (name) => `Pays de Home Assistant (${name})`,
@@ -151,6 +158,8 @@ const TEXTS = {
     only_holidays: "fériés seulement",
     except_calendar: (name) => `sauf ${name}`,
     only_calendar: (name) => `seulement ${name}`,
+    school_only: "en période scolaire",
+    vacation_only: "pendant les vacances",
     n_exceptions: (n) => (n === 1 ? "1 exception" : `${n} exceptions`),
   },
   en: {
@@ -164,6 +173,7 @@ const TEXTS = {
     new_agenda: "New agenda",
     agenda_name: "Agenda name",
     settings: "Settings",
+    support: "Support Agenda on Ko-fi",
     active: "Active",
     paused: "Paused",
     now: "Now",
@@ -255,7 +265,12 @@ const TEXTS = {
     resync_on_start: "Bring devices back to the agenda when Home Assistant starts",
     resync_now: "Apply now",
     delete_agenda: "Delete agenda",
-    holidays_title: "Public holidays (all agendas)",
+    holidays_title: "Shared settings (all agendas)",
+    school_calendar: "School holiday calendar",
+    school_calendar_hint: "Repeating events can then apply only during school term or only during school holidays.",
+    period: "Period",
+    periods: { always: "Always", school: "School term", vacation: "School holidays" },
+    vacation: "School holidays",
     country: "Country",
     subdivision: "Region",
     ha_country: (name) => `Home Assistant's country (${name})`,
@@ -292,6 +307,8 @@ const TEXTS = {
     only_holidays: "holidays only",
     except_calendar: (name) => `except ${name}`,
     only_calendar: (name) => `only ${name}`,
+    school_only: "school term only",
+    vacation_only: "school holidays only",
     n_exceptions: (n) => (n === 1 ? "1 exception" : `${n} exceptions`),
   },
 };
@@ -514,6 +531,8 @@ export function repeatSummary(event, T, hass) {
     const name = friendlyName(hass, r.calendar);
     extra.push(r.calendar_mode === "only" ? T.only_calendar(name) : T.except_calendar(name));
   }
+  if (r.period === "school") extra.push(T.school_only);
+  if (r.period === "vacation") extra.push(T.vacation_only);
   const nx = (r.exclude || []).length + (r.include || []).length;
   if (nx) extra.push(T.n_exceptions(nx));
   return [text, ...extra].join(" · ");

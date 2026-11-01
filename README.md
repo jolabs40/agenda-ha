@@ -26,8 +26,11 @@ agenda goes back to its default state.
 - Events repeat every N days, weeks (on chosen weekdays) or months, optionally until a date.
   Single days can be removed from or added to a series.
 - Public holidays of your country can be skipped, or used as the only days.
-- Any calendar can act as a condition: skip the days it has an event (school holidays, trips)
-  or keep only those days.
+- Any calendar can act as a condition: skip the days it has an event (trips, absences) or keep
+  only those days.
+- A school holiday calendar can be set once for all agendas. Each repeating event then applies
+  always, only during school term, or only during school holidays, and the week view marks the
+  holidays.
 - Start and end actions per event, edited with the regular Home Assistant action editor.
 - Per agenda: a `calendar` entity (Calendar panel, calendar triggers), an Active switch that
   pauses the agenda, Now and Next change sensors, and an `agenda.resync` action.
@@ -105,6 +108,17 @@ They follow the country set in Settings > System > General. Another country, or 
 state, a German Land, Alsace-Moselle...), can be picked in the settings of any agenda and applies
 to all of them.
 
+## School holidays
+
+Add a calendar holding the school holidays, for instance with the Remote Calendar integration and
+the published calendar of your school zone, then pick it in the shared settings of any agenda.
+In France the ministry publishes one per zone:
+`https://fr.ftp.opendatasoft.com/openscol/fr-en-calendrier-scolaire/Zone-A.ics` (or `Zone-B`,
+`Zone-C`, `Corse`).
+
+A child away at boarding school during the week, for example: mark the weekday slots as School
+term, and add an all-day daily event at the home temperature marked School holidays.
+
 ## Dashboard card
 
 ```yaml
@@ -121,6 +135,14 @@ agenda: Bedroom
 ```
 
 Clicking the card opens the panel.
+
+## Support
+
+Agenda is free. If it is useful to you, you can buy me a coffee on [Ko-fi](https://ko-fi.com/jolabs40).
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/jolabs40)
+
+A star on this repository also helps other people find it.
 
 ## License
 

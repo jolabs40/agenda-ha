@@ -1,17 +1,21 @@
-"""Public holiday settings shared by all agendas.
+"""Settings shared by all agendas: public holidays and the school holiday calendar.
 
-Defaults to the core country; the panel can pick another country and a subdivision.
+Holidays default to the core country; the panel can pick another country and a
+subdivision.
 """
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
+from . import recurrence
 from .const import DOMAIN, SHARED_STORAGE_VERSION
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,13 +62,14 @@ def _holiday_options(country: str | None) -> dict[str, Any]:
 
 
 class Shared:
-    """Holiday settings, stored in `.storage/agenda`."""
+    """Shared settings, stored in `.storage/agenda`."""
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
         self._store: Store[dict[str, Any]] = Store(hass, SHARED_STORAGE_VERSION, DOMAIN)
         self.country: str | None = None  # None means the core country
         self.subdiv: str | None = None
+        self.school_calendar: str | None = None
         self._holidays = None
 
     @property
@@ -76,6 +81,7 @@ class Shared:
         settings = data.get("holidays") or {}
         self.country = settings.get("country")
         self.subdiv = settings.get("subdiv")
+        self.school_calendar = data.get("school_calendar")
         await self.async_rebuild()
 
     async def async_rebuild(self) -> None:
@@ -87,10 +93,16 @@ class Shared:
             _build_holidays, country, self.subdiv, self.hass.config.language
         )
 
-    async def async_set(self, country: str | None, subdiv: str | None) -> None:
+    async def async_set(self, country: str | None, subdiv: str | None, school_calendar: str | None) -> None:
         self.country = country or None
         self.subdiv = subdiv or None
-        await self._store.async_save({"holidays": {"country": self.country, "subdiv": self.subdiv}})
+        self.school_calendar = school_calendar or None
+        await self._store.async_save(
+            {
+                "holidays": {"country": self.country, "subdiv": self.subdiv},
+                "school_calendar": self.school_calendar,
+            }
+        )
         await self.async_rebuild()
 
     async def async_options(self, country: str | None) -> dict[str, Any]:
@@ -112,10 +124,38 @@ class Shared:
             day += timedelta(days=1)
         return found
 
+    async def async_vacation_between(self, start: date, end: date) -> dict[str, str]:
+        """School holiday names by ISO date over [start, end), for display."""
+        if not self.school_calendar or self.hass.states.get(self.school_calendar) is None:
+            return {}
+        tz = dt_util.get_default_time_zone()
+        try:
+            response = await self.hass.services.async_call(
+                "calendar",
+                "get_events",
+                {
+                    "entity_id": self.school_calendar,
+                    "start_date_time": datetime.combine(start, time.min, tz).isoformat(),
+                    "end_date_time": datetime.combine(end, time.min, tz).isoformat(),
+                },
+                blocking=True,
+                return_response=True,
+            )
+        except (HomeAssistantError, ValueError) as err:
+            _LOGGER.warning("Cannot read %s: %s", self.school_calendar, err)
+            return {}
+        found: dict[str, str] = {}
+        for event in ((response or {}).get(self.school_calendar) or {}).get("events") or []:
+            for day in recurrence.calendar_days([(str(event["start"]), str(event["end"]))], tz):
+                if start <= day < end:
+                    found.setdefault(day.isoformat(), event.get("summary") or "")
+        return found
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "country": self.effective_country,
             "configured": self.country,
             "subdiv": self.subdiv,
             "ha_country": self.hass.config.country,
+            "school_calendar": self.school_calendar,
         }

@@ -157,7 +157,12 @@ class Agenda:
         days = self._calendar_days
         if extra:
             days = {key: days.get(key, set()) | extra.get(key, set()) for key in {*days, *extra}}
-        return recurrence.Context(is_holiday=self.shared.is_holiday, calendar_days=days)
+        school = self.shared.school_calendar
+        return recurrence.Context(
+            is_holiday=self.shared.is_holiday,
+            calendar_days=days,
+            vacation_days=days.get(school, set()) if school else None,
+        )
 
     def occurrences(
         self, start: datetime, end: datetime, ctx: recurrence.Context | None = None
@@ -290,7 +295,14 @@ class Agenda:
                 return
 
     def condition_calendars(self) -> set[str]:
-        return {calendar for event in self.events if (calendar := (event.get("repeat") or {}).get("calendar"))}
+        calendars = {calendar for event in self.events if (calendar := (event.get("repeat") or {}).get("calendar"))}
+        school = self.shared.school_calendar
+        if school and any(
+            (event.get("repeat") or {}).get("period", recurrence.PERIOD_ALWAYS) != recurrence.PERIOD_ALWAYS
+            for event in self.events
+        ):
+            calendars.add(school)
+        return calendars
 
     @callback
     def _track_calendars(self, refresh: bool = True) -> None:
@@ -502,8 +514,11 @@ class Agenda:
         self._notify()
 
     async def async_context_changed(self) -> None:
-        """Reschedule after the holiday settings changed."""
+        """Reschedule after the shared settings changed."""
         before, _ = self.desired()
+        if self.condition_calendars() != set(self._calendar_days):
+            self._track_calendars(refresh=False)
+        await self.async_refresh_calendars(apply=False)
         self._schedule()
         after, _ = self.desired()
         if after != before:

@@ -39,6 +39,7 @@ class AgendaPanel extends HTMLElement {
     this._data = null;
     this._occ = {};
     this._holidays = {};
+    this._vacation = {};
     this._dialogs = new Set();
     this._drag = null;
 
@@ -100,6 +101,8 @@ class AgendaPanel extends HTMLElement {
         <ha-icon class="logo" icon="mdi:calendar-month"></ha-icon>
         <div class="title">${esc(this.T.title)}</div>
         <div class="tabs" data-tabs></div>
+        <a class="ic kofi" href="https://ko-fi.com/jolabs40" target="_blank" rel="noopener noreferrer" title="${esc(this.T.support)}"
+          aria-label="${esc(this.T.support)}"><ha-icon icon="mdi:coffee-outline"></ha-icon></a>
       </div>
       <div class="bar" data-bar></div>
       <div class="status" data-status></div>
@@ -154,12 +157,14 @@ class AgendaPanel extends HTMLElement {
     if (this._view === "list" || !this._data?.agendas.length) {
       this._occ = {};
       this._holidays = {};
+      this._vacation = {};
       return;
     }
     const [a, b] = this._range();
     const res = await this.ws({ type: "agenda/occurrences", start: wallDate(a), end: wallDate(b) });
     this._occ = res.agendas || {};
     this._holidays = res.holidays || {};
+    this._vacation = res.vacation || {};
   }
 
   _now() {
@@ -219,10 +224,10 @@ class AgendaPanel extends HTMLElement {
         ? `<button class="ag all ${this._selected === "all" ? "on" : ""}" data-select="all">${esc(T.all)}</button>`
         : "";
     const [a, b] = this._range();
-    const holiday = this._view === "house" ? this._holidays[wallDate(a)] : null;
+    const notes = this._view === "house" ? [this._holidays[wallDate(a)], this._vacation[wallDate(a)]] : [];
     const label =
       this._view === "house"
-        ? `${fmtDay(a, T._lang, { weekday: "long", day: "numeric", month: "long" })}${holiday ? ` · ${holiday}` : ""}`
+        ? [fmtDay(a, T._lang, { weekday: "long", day: "numeric", month: "long" }), ...notes.filter(Boolean)].join(" · ")
         : fmtRange(a, b - DAY, T._lang);
     const sel = this._selected !== "all" ? this._agenda(this._selected) : null;
     bar.innerHTML = `<div class="ags">${allChip}${chips}
@@ -309,6 +314,7 @@ class AgendaPanel extends HTMLElement {
       agendas: this._shown(),
       occ: this._occ,
       holidays: this._holidays,
+      vacation: this._vacation,
       now,
       editable: this._isAdmin(),
     };
@@ -458,6 +464,7 @@ class AgendaPanel extends HTMLElement {
         agendas: this._data.agendas,
         event,
         occurrence,
+        shared: this._data.shared,
         ws: (m) => this.ws(m),
       }),
     );
@@ -486,7 +493,7 @@ class AgendaPanel extends HTMLElement {
         hass: this._hass,
         T: this.T,
         agenda,
-        holidays: this._data.holidays,
+        shared: this._data.shared,
         ws: (m) => this.ws(m),
         callApi: (method, path, body) => this._hass.callApi(method, path, body),
       }),
@@ -706,6 +713,7 @@ const STYLES = `
     --agenda-track: color-mix(in srgb, var(--primary-text-color) 5%, transparent);
     --agenda-input: color-mix(in srgb, var(--primary-text-color) 3%, var(--card-background-color));
     --agenda-holiday: var(--error-color, #db4437);
+    --agenda-vacation: #43a047;
   }
   [hidden] { display: none !important; }
   ha-icon { --mdc-icon-size: 20px; }
@@ -761,6 +769,8 @@ const STYLES = `
   .btn:hover { filter: brightness(1.05); }
   .ic { border: none; background: none; color: inherit; cursor: pointer; border-radius: 50%; width: 36px; height: 36px; display: inline-grid; place-items: center; }
   .ic:hover { background: var(--agenda-hover); }
+  .kofi { text-decoration: none; opacity: .65; }
+  .kofi:hover { opacity: 1; }
   .tgl { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
   .tgl input { display: none; }
   .tgl span { width: 36px; height: 20px; border-radius: 99px; background: var(--divider-color); position: relative; transition: background .15s; }
