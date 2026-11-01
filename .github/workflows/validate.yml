@@ -20,5 +20,3 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # the icon ships in custom_components/agenda/brand (Home Assistant 2026.3+)
-          ignore: brands
