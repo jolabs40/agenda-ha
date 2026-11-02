@@ -13,6 +13,8 @@ des blocs.
 
 ![Vue semaine](docs/week.png)
 
+[Voir la présentation de deux minutes sur YouTube](https://youtu.be/GYiXai78Mzg), sous-titrée en neuf langues dont le français.
+
 Un événement fixe ce que font les appareils liés (une température, un mode, marche ou arrêt, la
 position d'un volet, une option, une valeur) et peut lancer des actions à son début et à sa fin.
 Hors événement, l'agenda revient à son état par défaut.

@@ -12,6 +12,8 @@ Each room or device gets its own agenda, shown as a week you can edit by draggin
 
 ![Week view](docs/week.png)
 
+[Watch the two-minute tour on YouTube](https://youtu.be/GYiXai78Mzg), with subtitles in nine languages.
+
 An event sets what the linked devices should do (a temperature, a preset, on or off, a cover
 position, an option, a value) and can run actions when it starts and ends. Outside events the
 agenda goes back to its default state.
