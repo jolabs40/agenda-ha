@@ -9,7 +9,7 @@ des blocs.
 [![Ouvrir ce dépôt dans HACS sur votre Home Assistant.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
 [![Validate](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml/badge.svg)](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml)
 
-[English version](README.md)
+[English version](README.md) · [Deutsche Version](README.de.md) · [Nederlandse versie](README.nl.md)
 
 ![Vue semaine](docs/week.png)
 
@@ -23,27 +23,38 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 
 ## Fonctions
 
-- Un panneau dans la barre latérale, avec trois vues :
+- Un panneau dans la barre latérale, avec quatre vues :
   - Semaine : un clic sur un créneau vide ajoute un événement, on déplace un bloc en le faisant
     glisser, on l'allonge en tirant son bord bas. Pour un événement répété, on choisit entre ce
-    jour seulement et toute la série.
+    jour seulement et toute la série. Sur un écran tactile, un appui long saisit le bloc. Une
+    journée se copie vers d'autres jours de la semaine.
+  - Mois : les événements de chaque jour, avec les jours fériés et les vacances scolaires.
   - Maison : tous les agendas sur une journée, avec ce que fait chaque appareil en ce moment.
   - Liste : tous les événements et leur répétition.
-- Répétition tous les N jours, semaines (jours au choix) ou mois, éventuellement jusqu'à une date.
+- Répétition tous les N jours, semaines (jours au choix, ou seulement les semaines paires ou
+  impaires) ou mois (même date, 2e lundi, dernier vendredi...), éventuellement jusqu'à une date.
   On peut retirer ou ajouter des jours à une série.
+- Le début ou la fin d'un événement peut suivre le lever ou le coucher du soleil, avec un décalage.
+- Des conditions sur des entités : un événement ne prend la main que si, par exemple, quelqu'un
+  est à la maison ou une fenêtre est fermée.
 - Les jours fériés du pays peuvent être sautés, ou être les seuls jours retenus.
-- N'importe quel calendrier peut servir de condition : sauter les jours où il a un événement
-  (déplacements, absences) ou ne garder que ceux-là.
+- Des calendriers peuvent servir de condition : sauter les jours où ils ont un événement
+  (déplacements, absences) ou ne garder que ceux-là. Avec plusieurs calendriers, un événement dans
+  l'un d'eux suffit, ou il en faut un dans chacun.
 - Un calendrier des vacances scolaires se choisit une fois pour tous les agendas. Chaque événement
   répété s'applique alors toujours, seulement en période scolaire ou seulement pendant les
   vacances, et la vue Semaine signale les vacances.
 - Des actions de début et de fin par événement, avec l'éditeur d'actions habituel de Home Assistant.
+- Un mode absence pour toute la maison : les agendas qui le suivent gardent leur état d'absence
+  jusqu'à une date, ou jusqu'à ce qu'on l'arrête.
 - Pour chaque agenda : une entité `calendar` (panneau Calendrier, déclencheurs de calendrier), un
-  interrupteur Actif qui le suspend, les capteurs En ce moment et Prochain changement, et l'action
-  `agenda.resync`.
+  interrupteur Actif qui le suspend, les capteurs En ce moment et Prochain changement.
+- Des actions pour les automatisations et les assistants vocaux : sauter la prochaine occurrence,
+  ajouter ou retirer des dates, démarrer ou terminer le mode absence.
+- Les utilisateurs non administrateurs peuvent être autorisés à modifier les événements.
 - Après un redémarrage, les appareils liés sont remis dans l'état prévu (désactivable par agenda).
 - Une carte de tableau de bord, `custom:agenda-card`.
-- En français et en anglais.
+- En français, anglais, allemand et néerlandais.
 
 Ce qu'un agenda peut commander :
 
@@ -105,6 +116,44 @@ Les actions fonctionnent comme dans les automatisations, avec trois variables en
 - action: notify.mobile_app_telephone
   data:
     message: "{{ event.name }} ({{ agenda }}) {{ 'commence' if phase == 'start' else 'se termine' }}"
+```
+
+## Lever, coucher du soleil et conditions
+
+Les heures du soleil sont calculées par Home Assistant, jour par jour, pour l'emplacement réglé
+dans Paramètres > Système > Général. Quand le soleil fait passer la fin d'un événement avant son
+début (coucher après une fin fixée à 21:00 en été), l'événement n'a pas lieu ce jour-là.
+
+Les conditions comparent l'état d'une entité : `person.alex` est `home`, `binary_sensor.fenetre`
+n'est pas `on`. Elles sont lues au début de l'événement et à chaque changement de l'entité. Un
+événement dont les conditions ne sont plus remplies laisse la main à l'événement suivant, ou à
+l'état par défaut ; ses actions de fin s'exécutent quand même.
+
+## Mode absence
+
+Le bouton en haut du panneau le démarre, jusqu'à une date ou jusqu'à ce qu'on l'arrête ; les
+actions `agenda.set_absence` et `agenda.end_absence` font de même depuis une automatisation.
+Pendant ce temps, chaque agenda qui le suit (une option de ses réglages) garde son état d'absence,
+ou à défaut son état par défaut, et ne lance aucune action. À la fin, chaque agenda reprend son
+programme.
+
+## Automatisations
+
+| Action | Cible | Données |
+|---|---|---|
+| `agenda.skip_next` | le calendrier d'un agenda | `event` (nom, facultatif) : retire la prochaine occurrence |
+| `agenda.add_dates` | le calendrier d'un agenda | `event`, `dates` : ajoute des occurrences ces jours-là |
+| `agenda.remove_dates` | le calendrier d'un agenda | `event`, `dates` : retire les occurrences ces jours-là |
+| `agenda.set_absence` | | `until` (facultatif) : démarre le mode absence |
+| `agenda.end_absence` | | le termine |
+| `agenda.resync` | le calendrier d'un agenda | remet les appareils dans l'état voulu maintenant |
+
+```yaml
+- action: agenda.skip_next
+  target:
+    entity_id: calendar.agenda_sejour
+  data:
+    event: Matin
 ```
 
 ## Jours fériés

@@ -165,19 +165,48 @@ LABELS = {
         "open": "Open",
         "closed": "Closed",
     },
+    "de": {
+        "comfort": "Komfort",
+        "eco": "Eco",
+        "frost": "Frostschutz",
+        "boost": "Boost",
+        "away": "Abwesend",
+        "activity": "Aktivität",
+        "none": "Manuell",
+        "off": "Aus",
+        "on": "Ein",
+        "open": "Offen",
+        "closed": "Geschlossen",
+    },
+    "nl": {
+        "comfort": "Comfort",
+        "eco": "Eco",
+        "frost": "Vorst",
+        "boost": "Boost",
+        "away": "Afwezig",
+        "activity": "Activiteit",
+        "none": "Handmatig",
+        "off": "Uit",
+        "on": "Aan",
+        "open": "Open",
+        "closed": "Dicht",
+    },
 }
+
+# languages writing decimals with a comma
+DECIMAL_COMMA = ("fr", "de", "nl")
 
 
 def label(state: Mapping[str, Any] | None, language: str, unit: str | None = None) -> str | None:
     """Short text for a state, e.g. "20.5 °C", "Eco", "On 80 %"."""
     if not state:
         return None
-    french = language.startswith("fr")
-    words = LABELS["fr" if french else "en"]
+    lang = language[:2]
+    words = LABELS.get(lang, LABELS["en"])
 
     def number(value: float) -> str:
         text = f"{value:g}"
-        return text.replace(".", ",") if french else text
+        return text.replace(".", ",") if lang in DECIMAL_COMMA else text
 
     kind = state.get("type")
     if kind == "temperature":

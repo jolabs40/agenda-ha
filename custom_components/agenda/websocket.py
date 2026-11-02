@@ -1,8 +1,14 @@
-"""Websocket API used by the panel. Writes require an admin user."""
+"""Websocket API used by the panel.
+
+Agenda settings and shared settings require an admin user; events and the absence
+mode may also be edited by other users when the shared settings allow it.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
+from functools import wraps
 from typing import Any
 
 import voluptuous as vol
@@ -17,6 +23,7 @@ from homeassistant.util import dt as dt_util
 from . import devices, recurrence
 from .const import DOMAIN, SIGNAL_UPDATED
 from .manager import Agenda
+from .migration import upgrade_repeat
 from .shared import Shared
 
 STATE_SCHEMA = vol.Any(
@@ -47,18 +54,45 @@ STATE_SCHEMA = vol.Any(
     vol.Schema({vol.Required("type"): "value", vol.Required("value"): vol.Coerce(float)}),
 )
 
-REPEAT_SCHEMA = vol.Schema(
+REPEAT_SCHEMA = vol.All(
+    # a page loaded before the update still sends a single calendar
+    upgrade_repeat,
+    vol.Schema(
+        {
+            vol.Optional("freq", default=recurrence.FREQ_NONE): vol.In(recurrence.FREQS),
+            vol.Optional("interval", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=366)),
+            vol.Optional("weekdays", default=[]): [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))],
+            vol.Optional("until", default=None): vol.Any(None, cv.date),
+            vol.Optional("exclude", default=[]): [cv.date],
+            vol.Optional("include", default=[]): [cv.date],
+            vol.Optional("holidays", default=recurrence.HOLIDAYS_IGNORE): vol.In(recurrence.HOLIDAYS_MODES),
+            vol.Optional("calendars", default=[]): vol.All([cv.entity_domain("calendar")], vol.Unique()),
+            vol.Optional("calendar_mode", default=recurrence.CALENDAR_EXCLUDE): vol.In(recurrence.CALENDAR_MODES),
+            vol.Optional("calendar_match", default=recurrence.CALENDAR_ANY): vol.In(recurrence.CALENDAR_MATCHES),
+            vol.Optional("period", default=recurrence.PERIOD_ALWAYS): vol.In(recurrence.PERIODS),
+            vol.Optional("monthly", default=recurrence.MONTHLY_DAY): vol.In(recurrence.MONTHLY_MODES),
+            vol.Optional("weeks", default=recurrence.WEEKS_ALL): vol.In(recurrence.WEEKS_MODES),
+        }
+    ),
+)
+
+SUN_SCHEMA = vol.Any(
+    None,
+    vol.Schema(
+        {
+            vol.Required("event"): vol.In(recurrence.SUN_EVENTS),
+            vol.Optional("offset", default=0): vol.All(
+                vol.Coerce(int), vol.Range(min=-recurrence.MAX_SUN_OFFSET, max=recurrence.MAX_SUN_OFFSET)
+            ),
+        }
+    ),
+)
+
+CONDITION_SCHEMA = vol.Schema(
     {
-        vol.Optional("freq", default=recurrence.FREQ_NONE): vol.In(recurrence.FREQS),
-        vol.Optional("interval", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=366)),
-        vol.Optional("weekdays", default=[]): [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))],
-        vol.Optional("until", default=None): vol.Any(None, cv.date),
-        vol.Optional("exclude", default=[]): [cv.date],
-        vol.Optional("include", default=[]): [cv.date],
-        vol.Optional("holidays", default=recurrence.HOLIDAYS_IGNORE): vol.In(recurrence.HOLIDAYS_MODES),
-        vol.Optional("calendar", default=None): vol.Any(None, cv.entity_domain("calendar")),
-        vol.Optional("calendar_mode", default=recurrence.CALENDAR_EXCLUDE): vol.In(recurrence.CALENDAR_MODES),
-        vol.Optional("period", default=recurrence.PERIOD_ALWAYS): vol.In(recurrence.PERIODS),
+        vol.Required("entity_id"): cv.entity_id,
+        vol.Required("state"): vol.All(vol.Coerce(str), vol.Length(min=1)),
+        vol.Optional("not", default=False): bool,
     }
 )
 
@@ -78,6 +112,9 @@ EVENT_SCHEMA = vol.Schema(
         vol.Optional("start_actions", default=[]): list,
         vol.Optional("end_actions", default=[]): list,
         vol.Optional("note", default=""): str,
+        vol.Optional("start_sun", default=None): SUN_SCHEMA,
+        vol.Optional("end_sun", default=None): SUN_SCHEMA,
+        vol.Optional("conditions", default=[]): [CONDITION_SCHEMA],
     }
 )
 
@@ -89,8 +126,23 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("entities"): [cv.entity_id],
         vol.Optional("default_state"): STATE_SCHEMA,
         vol.Optional("resync_on_start"): bool,
+        vol.Optional("follow_absence"): bool,
+        vol.Optional("away_state"): STATE_SCHEMA,
     }
 )
+
+
+def require_editor(func: Callable) -> Callable:
+    """Admin users, or every user when the shared settings allow it."""
+
+    @wraps(func)
+    def check(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> Any:
+        if not connection.user.is_admin and not _shared(hass).allow_users:
+            connection.send_error(msg["id"], websocket_api.ERR_UNAUTHORIZED, "Unauthorized")
+            return None
+        return func(hass, connection, msg)
+
+    return check
 
 
 def _event_json(event: dict[str, Any]) -> dict[str, Any]:
@@ -138,6 +190,8 @@ def async_register(hass: HomeAssistant) -> None:
         ws_resync,
         ws_holiday_options,
         ws_save_shared,
+        ws_sun,
+        ws_set_absence,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -219,7 +273,7 @@ async def _guard(connection, msg, coro_factory) -> None:
         connection.send_result(msg["id"], result)
 
 
-@websocket_api.require_admin
+@require_editor
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "agenda/event/save",
@@ -236,7 +290,7 @@ async def ws_save_event(hass: HomeAssistant, connection: websocket_api.ActiveCon
     await _guard(connection, msg, run)
 
 
-@websocket_api.require_admin
+@require_editor
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "agenda/event/delete",
@@ -253,7 +307,7 @@ async def ws_delete_event(hass: HomeAssistant, connection: websocket_api.ActiveC
     )
 
 
-@websocket_api.require_admin
+@require_editor
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "agenda/event/detach",
@@ -293,7 +347,7 @@ async def ws_save_settings(hass: HomeAssistant, connection: websocket_api.Active
     await _guard(connection, msg, run)
 
 
-@websocket_api.require_admin
+@require_editor
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "agenda/set_enabled",
@@ -324,6 +378,7 @@ async def ws_resync(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         vol.Optional("country", default=None): vol.Any(None, vol.All(str, vol.Length(min=2, max=3))),
         vol.Optional("subdiv", default=None): vol.Any(None, str),
         vol.Optional("school_calendar", default=None): vol.Any(None, cv.entity_domain("calendar")),
+        vol.Optional("allow_users"): bool,
     }
 )
 @websocket_api.async_response
@@ -335,8 +390,30 @@ async def ws_save_shared(hass: HomeAssistant, connection: websocket_api.ActiveCo
             options = await shared.async_options(country)
             if country not in options["countries"]:
                 raise HomeAssistantError(f"unknown country: {country}")
-        await shared.async_set(country, msg["subdiv"], msg["school_calendar"])
+        await shared.async_set(country, msg["subdiv"], msg["school_calendar"], msg.get("allow_users"))
         for agenda in _agendas(hass).values():
             await agenda.async_context_changed()
 
     await _guard(connection, msg, run)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "agenda/sun", vol.Required("date"): cv.date})
+@callback
+def ws_sun(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Sunrise and sunset of a local day, for the event editor."""
+    shared = _shared(hass)
+    times = {which: shared.sun(msg["date"], which) for which in recurrence.SUN_EVENTS}
+    connection.send_result(msg["id"], {key: t.strftime("%H:%M") if t else None for key, t in times.items()})
+
+
+@require_editor
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "agenda/absence/set",
+        vol.Required("active"): bool,
+        vol.Optional("until", default=None): vol.Any(None, cv.string),  # local "2026-11-10T18:00"
+    }
+)
+@websocket_api.async_response
+async def ws_set_absence(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    await _guard(connection, msg, lambda: _shared(hass).async_set_absence(msg["active"], msg["until"]))

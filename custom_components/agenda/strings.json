@@ -35,6 +35,58 @@
     "resync": {
       "name": "Resynchronise",
       "description": "Brings the devices controlled by the agenda back to the state it wants now."
+    },
+    "skip_next": {
+      "name": "Skip the next occurrence",
+      "description": "Removes the next occurrence to start, of one event or of any event of the agenda.",
+      "fields": {
+        "event": {
+          "name": "Event",
+          "description": "Event name. Leave empty for the next occurrence of any event."
+        }
+      }
+    },
+    "add_dates": {
+      "name": "Add dates",
+      "description": "Adds occurrences of an event on these days, on top of its repetition.",
+      "fields": {
+        "event": {
+          "name": "Event",
+          "description": "Event name (every event with this name)."
+        },
+        "dates": {
+          "name": "Dates",
+          "description": "Days to add, such as 2026-12-24."
+        }
+      }
+    },
+    "remove_dates": {
+      "name": "Remove dates",
+      "description": "Removes the occurrences of an event on these days.",
+      "fields": {
+        "event": {
+          "name": "Event",
+          "description": "Event name (every event with this name)."
+        },
+        "dates": {
+          "name": "Dates",
+          "description": "Days to remove, such as 2026-12-24."
+        }
+      }
+    },
+    "set_absence": {
+      "name": "Start the absence mode",
+      "description": "Agendas that follow the absence mode keep their away state and run no action until it ends.",
+      "fields": {
+        "until": {
+          "name": "Until",
+          "description": "End of the absence. Leave empty to stop it by hand."
+        }
+      }
+    },
+    "end_absence": {
+      "name": "End the absence mode",
+      "description": "Agendas go back to their schedule."
     }
   }
 }

@@ -20,14 +20,19 @@ Event shape (missing fields take their default value):
         "exclude": ["2026-11-11"],    # days without an occurrence
         "include": ["2026-12-24"],    # days added on top of the rule
         "holidays": "ignore" | "exclude" | "only",
-        "calendar": "calendar.trips" | null,
+        "calendars": ["calendar.trips"],  # condition calendars, none by default
         "calendar_mode": "exclude" | "only",
-        "period": "always" | "school" | "vacation"   # against the shared school calendar
+        "calendar_match": "any" | "all",  # busy in one of them, or in all of them
+        "period": "always" | "school" | "vacation",  # against the shared school calendar
+        "monthly": "day" | "weekday" | "last_weekday",  # 12th / 2nd Monday / last Monday
+        "weeks": "all" | "even" | "odd"   # ISO week numbers
       },
+      "start_sun": {"event": "sunrise" | "sunset", "offset": -30} | null,
+      "end_sun": {...} | null,        # replace the time of day of start / end
       "state": {...} | null           # what linked entities should be (see devices.py)
     }
 
-Public holidays and calendar days are passed in through a `Context`.
+Public holidays, calendar days and sun times are passed in through a `Context`.
 """
 
 from __future__ import annotations
@@ -51,17 +56,39 @@ HOLIDAYS_MODES = (HOLIDAYS_IGNORE, HOLIDAYS_EXCLUDE, HOLIDAYS_ONLY)
 CALENDAR_EXCLUDE = "exclude"
 CALENDAR_ONLY = "only"
 CALENDAR_MODES = (CALENDAR_EXCLUDE, CALENDAR_ONLY)
+CALENDAR_ANY = "any"
+CALENDAR_ALL = "all"
+CALENDAR_MATCHES = (CALENDAR_ANY, CALENDAR_ALL)
 
 PERIOD_ALWAYS = "always"
 PERIOD_SCHOOL = "school"
 PERIOD_VACATION = "vacation"
 PERIODS = (PERIOD_ALWAYS, PERIOD_SCHOOL, PERIOD_VACATION)
 
+MONTHLY_DAY = "day"
+MONTHLY_WEEKDAY = "weekday"
+MONTHLY_LAST_WEEKDAY = "last_weekday"
+MONTHLY_MODES = (MONTHLY_DAY, MONTHLY_WEEKDAY, MONTHLY_LAST_WEEKDAY)
+
+WEEKS_ALL = "all"
+WEEKS_EVEN = "even"
+WEEKS_ODD = "odd"
+WEEKS_MODES = (WEEKS_ALL, WEEKS_EVEN, WEEKS_ODD)
+
+SUNRISE = "sunrise"
+SUNSET = "sunset"
+SUN_EVENTS = (SUNRISE, SUNSET)
+MAX_SUN_OFFSET = 720  # minutes
+
 ONE_DAY = timedelta(days=1)
 
 
 def _no_holiday(_day: date) -> bool:
     return False
+
+
+def _no_sun(_day: date, _event: str) -> datetime | None:
+    return None
 
 
 @dataclass(frozen=True)
@@ -73,6 +100,8 @@ class Context:
     calendar_days: Mapping[str, Set[date]] = field(default_factory=dict)
     # school holiday days, or None when no school calendar is set
     vacation_days: Set[date] | None = None
+    # naive local time of sunrise or sunset on a day; None keeps the stored time
+    sun: Callable[[date, str], datetime | None] = _no_sun
 
 
 NO_CONTEXT = Context()
@@ -129,10 +158,27 @@ def validate_event(event: dict[str, Any]) -> None:
             raise ValueError(f"invalid weekday: {day}")
     if repeat.get("holidays", HOLIDAYS_IGNORE) not in HOLIDAYS_MODES:
         raise ValueError("unknown public holiday setting")
-    if repeat.get("calendar") and repeat.get("calendar_mode", CALENDAR_EXCLUDE) not in CALENDAR_MODES:
-        raise ValueError("unknown calendar condition")
+    if repeat.get("calendars"):
+        if repeat.get("calendar_mode", CALENDAR_EXCLUDE) not in CALENDAR_MODES:
+            raise ValueError("unknown calendar condition")
+        if repeat.get("calendar_match", CALENDAR_ANY) not in CALENDAR_MATCHES:
+            raise ValueError("unknown calendar match")
     if repeat.get("period", PERIOD_ALWAYS) not in PERIODS:
         raise ValueError("unknown period")
+    if repeat.get("monthly", MONTHLY_DAY) not in MONTHLY_MODES:
+        raise ValueError("unknown monthly repetition")
+    if repeat.get("weeks", WEEKS_ALL) not in WEEKS_MODES:
+        raise ValueError("unknown week restriction")
+    for key in ("start_sun", "end_sun"):
+        anchor = event.get(key)
+        if not anchor:
+            continue
+        if event.get("all_day"):
+            raise ValueError("an all-day event cannot follow the sun")
+        if anchor.get("event") not in SUN_EVENTS:
+            raise ValueError(f"unknown sun event: {anchor.get('event')}")
+        if abs(int(anchor.get("offset", 0))) > MAX_SUN_OFFSET:
+            raise ValueError("the sun offset is limited to 12 hours")
     for key in ("exclude", "include"):
         for day in repeat.get(key) or []:
             date.fromisoformat(day)
@@ -142,6 +188,44 @@ def validate_event(event: dict[str, Any]) -> None:
 
 def _monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
+
+
+def _same_day_of_month(day: date, first: date, mode: str) -> bool:
+    """Monthly match: same date, same rank of weekday (2nd Monday), or last weekday."""
+    if mode == MONTHLY_WEEKDAY:
+        return day.weekday() == first.weekday() and (day.day - 1) // 7 == (first.day - 1) // 7
+    if mode == MONTHLY_LAST_WEEKDAY:
+        return day.weekday() == first.weekday() and (day + timedelta(days=7)).month != day.month
+    return day.day == first.day
+
+
+def wall_bounds(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> tuple[datetime, datetime] | None:
+    """Naive local start and end of the occurrence starting on `day`.
+
+    Sun anchors replace the time of day; when they bring the end before the start
+    (sunset after the fixed end in summer) there is no occurrence that day.
+    """
+    first, duration = bounds(event)
+    last = first + duration
+    span = (last.date() - first.date()).days
+    start = datetime.combine(day, first.time())
+    end = datetime.combine(day + timedelta(days=span), last.time())
+    for key, which in (("start_sun", "start"), ("end_sun", "end")):
+        anchor = event.get(key)
+        if not anchor:
+            continue
+        on = day if which == "start" else day + timedelta(days=span)
+        sun = ctx.sun(on, anchor["event"])
+        if sun is None:
+            continue
+        point = sun + timedelta(minutes=int(anchor.get("offset", 0)))
+        if which == "start":
+            start = point
+        else:
+            end = point
+    if end <= start:
+        return None
+    return start, end
 
 
 def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bool:
@@ -174,10 +258,14 @@ def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bo
         match = day.weekday() in weekdays and weeks % interval == 0
     elif freq == FREQ_MONTHLY:
         months = (day.year - first.year) * 12 + day.month - first.month
-        match = day.day == first.day and months % interval == 0
+        match = months % interval == 0 and _same_day_of_month(day, first, repeat.get("monthly", MONTHLY_DAY))
     else:
         return False
     if not match:
+        return False
+
+    weeks = repeat.get("weeks", WEEKS_ALL)
+    if weeks != WEEKS_ALL and (day.isocalendar().week % 2 == 0) != (weeks == WEEKS_EVEN):
         return False
 
     holidays = repeat.get("holidays", HOLIDAYS_IGNORE)
@@ -186,10 +274,11 @@ def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bo
     if holidays == HOLIDAYS_ONLY and not ctx.is_holiday(day):
         return False
 
-    calendar = repeat.get("calendar")
-    if calendar:
-        busy = day in ctx.calendar_days.get(calendar, ())
-        if busy != (repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY):
+    calendars = repeat.get("calendars")
+    if calendars:
+        busy = [day in ctx.calendar_days.get(calendar, ()) for calendar in calendars]
+        hit = all(busy) if repeat.get("calendar_match", CALENDAR_ANY) == CALENDAR_ALL else any(busy)
+        if hit != (repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY):
             return False
 
     period = repeat.get("period", PERIOD_ALWAYS)
@@ -211,18 +300,19 @@ def occurrences(
     """Occurrences of the event overlapping [start, end) (aware bounds)."""
     if not event.get("enabled", True):
         return []
-    first, duration = bounds(event)
+    _, duration = bounds(event)
     local_start = start.astimezone(tz).replace(tzinfo=None)
     local_end = end.astimezone(tz).replace(tzinfo=None)
-    # an occurrence that started the day before (or earlier, if long) may spill over
-    day = (local_start - duration).date() - ONE_DAY
+    # an occurrence that started the day before (or earlier, if long) may spill over;
+    # a sun anchor can make it longer than the stored duration
+    margin = 2 * ONE_DAY if event.get("start_sun") or event.get("end_sun") else ONE_DAY
+    day = (local_start - duration).date() - margin
     last = local_end.date()
     found: list[Occurrence] = []
     while day <= last:
-        if starts_on(event, day, ctx):
-            wall_start = datetime.combine(day, first.time())
-            occ_start = wall_start.replace(tzinfo=tz).astimezone(UTC)
-            occ_end = (wall_start + duration).replace(tzinfo=tz).astimezone(UTC)
+        if starts_on(event, day, ctx) and (wall := wall_bounds(event, day, ctx)) is not None:
+            occ_start = wall[0].replace(tzinfo=tz).astimezone(UTC)
+            occ_end = wall[1].replace(tzinfo=tz).astimezone(UTC)
             if occ_end > start and occ_start < end:
                 found.append(
                     Occurrence(

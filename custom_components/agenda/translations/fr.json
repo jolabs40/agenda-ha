@@ -35,6 +35,58 @@
     "resync": {
       "name": "Resynchroniser",
       "description": "Remet les appareils commandés par l'agenda dans l'état qu'il veut maintenant."
+    },
+    "skip_next": {
+      "name": "Sauter la prochaine occurrence",
+      "description": "Retire la prochaine occurrence à venir, d'un événement ou de n'importe quel événement de l'agenda.",
+      "fields": {
+        "event": {
+          "name": "Événement",
+          "description": "Nom de l'événement. Vide : la prochaine occurrence, quel que soit l'événement."
+        }
+      }
+    },
+    "add_dates": {
+      "name": "Ajouter des dates",
+      "description": "Ajoute des occurrences d'un événement ces jours-là, en plus de sa répétition.",
+      "fields": {
+        "event": {
+          "name": "Événement",
+          "description": "Nom de l'événement (tous les événements de ce nom)."
+        },
+        "dates": {
+          "name": "Dates",
+          "description": "Jours à ajouter, par exemple 2026-12-24."
+        }
+      }
+    },
+    "remove_dates": {
+      "name": "Retirer des dates",
+      "description": "Retire les occurrences d'un événement ces jours-là.",
+      "fields": {
+        "event": {
+          "name": "Événement",
+          "description": "Nom de l'événement (tous les événements de ce nom)."
+        },
+        "dates": {
+          "name": "Dates",
+          "description": "Jours à retirer, par exemple 2026-12-24."
+        }
+      }
+    },
+    "set_absence": {
+      "name": "Démarrer le mode absence",
+      "description": "Les agendas qui suivent le mode absence gardent leur état d'absence et ne lancent aucune action jusqu'à la fin.",
+      "fields": {
+        "until": {
+          "name": "Jusqu'au",
+          "description": "Fin de l'absence. Vide : à arrêter à la main."
+        }
+      }
+    },
+    "end_absence": {
+      "name": "Terminer le mode absence",
+      "description": "Les agendas reprennent leur programme."
     }
   }
 }

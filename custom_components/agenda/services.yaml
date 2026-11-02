@@ -3,3 +3,57 @@ resync:
     entity:
       integration: agenda
       domain: calendar
+
+skip_next:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
+  fields:
+    event:
+      example: Morning
+      selector:
+        text:
+
+add_dates:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
+  fields:
+    event:
+      required: true
+      example: Morning
+      selector:
+        text:
+    dates:
+      required: true
+      example: '["2026-12-24"]'
+      selector:
+        object:
+
+remove_dates:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
+  fields:
+    event:
+      required: true
+      example: Morning
+      selector:
+        text:
+    dates:
+      required: true
+      example: '["2026-12-24"]'
+      selector:
+        object:
+
+set_absence:
+  fields:
+    until:
+      example: "2026-11-10 18:00:00"
+      selector:
+        datetime:
+
+end_absence:

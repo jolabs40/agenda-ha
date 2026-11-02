@@ -8,7 +8,7 @@ Each room or device gets its own agenda, shown as a week you can edit by draggin
 [![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
 [![Validate](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml/badge.svg)](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml)
 
-[Version française](README.fr.md)
+[Version française](README.fr.md) · [Deutsche Version](README.de.md) · [Nederlandse versie](README.nl.md)
 
 ![Week view](docs/week.png)
 
@@ -20,26 +20,38 @@ agenda goes back to its default state.
 
 ## Features
 
-- A sidebar panel with three views:
+- A sidebar panel with four views:
   - Week: click an empty slot to add an event, drag a block to move it, pull its bottom edge to
     make it longer. Moving a repeated event asks whether it applies to that day or the whole series.
+    On a touch screen, a long press picks a block up. A day can be copied to other days of the week.
+  - Month: each day's events, with public and school holidays.
   - House: every agenda over one day, with what each device is doing now.
   - List: all events and how they repeat.
-- Events repeat every N days, weeks (on chosen weekdays) or months, optionally until a date.
-  Single days can be removed from or added to a series.
+- Events repeat every N days, weeks (on chosen weekdays, or on even or odd weeks only) or months
+  (on the same date, on the 2nd Monday, on the last Friday...), optionally until a date. Single
+  days can be removed from or added to a series.
+- The start or the end of an event can follow sunrise or sunset, with an offset.
+- Conditions on entities: an event takes charge only while, for instance, someone is home or a
+  window is closed.
 - Public holidays of your country can be skipped, or used as the only days.
-- Any calendar can act as a condition: skip the days it has an event (trips, absences) or keep
-  only those days.
+- Calendars can act as conditions: skip the days with an event in them (trips, absences) or keep
+  only those days. With several calendars, an event in one of them is enough, or one is needed in
+  each of them.
 - A school holiday calendar can be set once for all agendas. Each repeating event then applies
   always, only during school term, or only during school holidays, and the week view marks the
   holidays.
 - Start and end actions per event, edited with the regular Home Assistant action editor.
+- An absence mode for the whole house: the agendas that follow it keep their away state until a
+  date, or until it is stopped.
 - Per agenda: a `calendar` entity (Calendar panel, calendar triggers), an Active switch that
-  pauses the agenda, Now and Next change sensors, and an `agenda.resync` action.
+  pauses the agenda, Now and Next change sensors.
+- Actions for automations and voice assistants: skip the next occurrence, add or remove dates,
+  start or end the absence mode.
+- Non-admin users can be allowed to edit events.
 - After a restart the linked devices are put back in the state the agenda expects (can be turned
   off per agenda).
 - A dashboard card, `custom:agenda-card`.
-- English and French.
+- English, French, German and Dutch.
 
 What an agenda can control:
 
@@ -102,6 +114,43 @@ Actions work as in automations, with three extra variables:
 - action: notify.mobile_app_phone
   data:
     message: "{{ event.name }} ({{ agenda }}) {{ 'starts' if phase == 'start' else 'ends' }}"
+```
+
+## Sunrise, sunset and conditions
+
+Sun times are computed by Home Assistant, day by day, for the location set in Settings > System >
+General. When the sun brings the end of an event before its start (sunset after a fixed 21:00 end
+in summer), the event is skipped that day.
+
+Conditions compare the state of an entity: `person.alex` is `home`, `binary_sensor.window` is not
+`on`. They are read when the event starts and whenever the entity changes. An event whose
+conditions stop holding hands over to the next event in charge, or to the default state; its end
+actions still run.
+
+## Absence mode
+
+The button at the top of the panel starts it, until a date or until it is stopped; the actions
+`agenda.set_absence` and `agenda.end_absence` do the same from an automation. Meanwhile each agenda
+that follows it (an option in its settings) keeps its away state, or its default state, and runs
+no action. At the end every agenda goes back to its schedule.
+
+## Automations
+
+| Action | Target | Data |
+|---|---|---|
+| `agenda.skip_next` | an agenda's calendar | `event` (optional name): removes the next occurrence |
+| `agenda.add_dates` | an agenda's calendar | `event`, `dates`: adds occurrences on these days |
+| `agenda.remove_dates` | an agenda's calendar | `event`, `dates`: removes the occurrences on these days |
+| `agenda.set_absence` | | `until` (optional): starts the absence mode |
+| `agenda.end_absence` | | ends it |
+| `agenda.resync` | an agenda's calendar | puts the devices back in the state the agenda wants now |
+
+```yaml
+- action: agenda.skip_next
+  target:
+    entity_id: calendar.agenda_living_room
+  data:
+    event: Morning
 ```
 
 ## Public holidays

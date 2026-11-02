@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+
+import voluptuous as vol
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_platform
+from homeassistant.core import HomeAssistant, ServiceResponse, SupportsResponse
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -22,6 +24,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities([AgendaCalendar(agenda)])
     platform = entity_platform.async_get_current_platform()
     platform.async_register_entity_service("resync", None, "async_resync")
+    platform.async_register_entity_service(
+        "skip_next",
+        {vol.Optional("event"): cv.string},
+        "async_skip_next",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    dates = {vol.Required("event"): cv.string, vol.Required("dates"): vol.All(cv.ensure_list, [cv.date])}
+    platform.async_register_entity_service("add_dates", dates, "async_add_dates")
+    platform.async_register_entity_service("remove_dates", dates, "async_remove_dates")
 
 
 class AgendaCalendar(AgendaEntity, CalendarEntity):
@@ -62,3 +73,13 @@ class AgendaCalendar(AgendaEntity, CalendarEntity):
 
     async def async_resync(self) -> None:
         await self.agenda.async_resync()
+
+    async def async_skip_next(self, event: str | None = None) -> ServiceResponse:
+        day = await self.agenda.async_skip_next(event)
+        return {"skipped": day}
+
+    async def async_add_dates(self, event: str, dates: list[date]) -> None:
+        await self.agenda.async_change_dates(event, dates, add=True)
+
+    async def async_remove_dates(self, event: str, dates: list[date]) -> None:
+        await self.agenda.async_change_dates(event, dates, add=False)

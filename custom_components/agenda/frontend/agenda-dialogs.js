@@ -2,9 +2,13 @@
 // the panel's #dialog container and resolves a promise when closed.
 
 const V = new URL(import.meta.url).search;
-const { DAY, esc, fmtDay, friendlyName, loadHaComponents, wallDate, wallTime, weekday, wm } = await import(
-  `./agenda-lib.js${V}`
-);
+const { DAY, esc, fmtDay, friendlyName, loadHaComponents, monthlyLabel, wall, wallDate, wallTime, weekday, wm } =
+  await import(`./agenda-lib.js${V}`);
+
+const SUN_LIMIT = 720; // minutes of offset, as on the server
+
+/** "HH:MM" plus minutes, wrapped around the day. */
+const addMinutes = (hhmm, minutes) => wallTime(wm(`2000-01-01T${hhmm}`) + minutes);
 const kinds = await import(`./agenda-kinds.js${V}`);
 
 const SWATCHES = [
@@ -116,6 +120,78 @@ export function promptDialog(host, { title, label, value = "", ok }) {
   return dlg.done;
 }
 
+/**
+ * Start, change or end the absence mode. `absence` is the shared value ({until} or null),
+ * `now` the wall minutes in Home Assistant's zone. Resolves with "saved" or null.
+ */
+export function absenceDialog(host, { T, absence, now, ws }) {
+  const dlg = new Dialog(host, { title: T.absence_title });
+  // by default, a week later at the next full hour
+  const until = absence?.until || wall(Math.ceil((now + 7 * DAY) / 60) * 60);
+  const open = Boolean(absence) && !absence.until;
+  dlg.open(
+    `<p class="hint">${esc(T.absence_hint)}</p>
+    <label class="tgl"><input type="checkbox" data-open ${open ? "checked" : ""}><span></span>${esc(T.absence_open)}</label>
+    <label class="fld" data-until-row ${open ? "hidden" : ""}><span>${esc(T.absence_until)}</span>
+      <input type="datetime-local" class="inp" step="300" data-until value="${esc(until)}"></label>`,
+    `${absence ? `<button class="btn danger flat" data-stop>${esc(T.absence_stop)}</button>` : ""}
+    <span class="grow"></span>
+    <button class="btn" data-close>${esc(T.cancel)}</button>
+    <button class="btn primary" data-start>${esc(absence ? T.save : T.absence_start)}</button>`,
+    "",
+    T.close,
+  );
+  const openBox = dlg.$("[data-open]");
+  openBox.addEventListener("change", () => (dlg.$("[data-until-row]").hidden = openBox.checked));
+  dlg.$("[data-start]").addEventListener("click", () =>
+    dlg.run(async () => {
+      const value = dlg.$("[data-until]").value.slice(0, 16);
+      if (!openBox.checked && (!value || wm(value) <= now)) throw new Error(T.absence_until);
+      await ws({ type: "agenda/absence/set", active: true, until: openBox.checked ? null : value });
+      dlg.close("saved");
+    }, T),
+  );
+  dlg.$("[data-stop]")?.addEventListener("click", () =>
+    dlg.run(async () => {
+      await ws({ type: "agenda/absence/set", active: false });
+      dlg.close("saved");
+    }, T),
+  );
+  return dlg.done;
+}
+
+/** Pick the days of the same week to copy `day` to. Resolves with their wall minutes, or null. */
+export function copyDayDialog(host, { T, day, firstDay }) {
+  const lang = T._lang;
+  const dlg = new Dialog(host, { title: T.copy_day_title(fmtDay(day, lang, { weekday: "long", day: "numeric" })) });
+  const days = Array.from({ length: 7 }, (_, i) => firstDay + i * DAY);
+  dlg.open(
+    `<p class="hint">${esc(T.copy_day_hint)}</p>
+    <div class="fld"><span>${esc(T.copy_to)}</span><div class="days">${days
+      .map(
+        (d) =>
+          `<button class="day" data-target="${d}" ${d === day ? "disabled" : ""} title="${esc(fmtDay(d, lang, { weekday: "long", day: "numeric" }))}">${esc(T.weekdays_short[weekday(d)])}</button>`,
+      )
+      .join("")}</div></div>`,
+    `<span class="grow"></span><button class="btn" data-close>${esc(T.cancel)}</button>
+    <button class="btn primary" data-copy disabled>${esc(T.copy)}</button>`,
+    "",
+    T.close,
+  );
+  const picked = new Set();
+  dlg.$$("[data-target]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const d = Number(b.dataset.target);
+      if (picked.has(d)) picked.delete(d);
+      else picked.add(d);
+      b.classList.toggle("on", picked.has(d));
+      dlg.$("[data-copy]").disabled = !picked.size;
+    }),
+  );
+  dlg.$("[data-copy]").addEventListener("click", () => dlg.close([...picked].sort((a, b) => a - b)));
+  return dlg.done;
+}
+
 async function actionEditor(container, hass, value, onChange, T) {
   const ok = await loadHaComponents();
   container.innerHTML = "";
@@ -168,13 +244,42 @@ export function eventEditor(host, opts) {
     exclude: [],
     include: [],
     holidays: "ignore",
-    calendar: null,
+    calendars: [],
     calendar_mode: "exclude",
+    calendar_match: "any",
     period: "always",
+    monthly: "day",
+    weeks: "all",
     ...(ev.repeat || {}),
   };
   ev.start_actions = ev.start_actions || [];
   ev.end_actions = ev.end_actions || [];
+  ev.start_sun = ev.start_sun || null;
+  ev.end_sun = ev.end_sun || null;
+  ev.conditions = structuredClone(ev.conditions || []);
+  // sunrise and sunset of the dates shown, from the server
+  const sunTimes = new Map();
+  const sunAllowed = () => !ev.all_day && st.scope === "series";
+  const anchorOf = (which) => (sunAllowed() ? ev[`${which}_sun`] : null);
+  const loadSun = (day) => {
+    if (!day || sunTimes.has(day)) return;
+    sunTimes.set(day, null);
+    opts
+      .ws({ type: "agenda/sun", date: day })
+      .then((times) => {
+        sunTimes.set(day, times);
+        sections.when();
+      })
+      .catch(() => {});
+  };
+  /** Time of a bound on the form's date: the sun time plus its offset, or the typed time. */
+  const timeOf = (which) => {
+    const f = F();
+    const typed = which === "start" ? f.t1 : f.t2;
+    const anchor = anchorOf(which);
+    const sun = anchor && sunTimes.get(f.date)?.[anchor.event];
+    return sun ? addMinutes(sun, Number(anchor.offset) || 0) : typed;
+  };
   const occ = opts.occurrence && ev.repeat.freq !== "none" ? opts.occurrence : null;
   const st = { scope: "series" };
 
@@ -229,6 +334,7 @@ export function eventEditor(host, opts) {
     <section data-sec="when"></section>
     <section data-sec="repeat"></section>
     <details class="more" data-sec-wrap="exceptions"><summary>${esc(T.exceptions)}<span data-count></span></summary><div data-sec="exceptions"></div></details>
+    <details class="more" ${ev.conditions.length ? "open" : ""}><summary>${esc(T.conditions)}<span data-ccount></span></summary><div data-sec="conditions"></div></details>
     <details class="more"><summary>${esc(T.look)}</summary>
       <div class="look">
         <div class="fld"><span>${esc(T.color)}</span><div class="swatches" data-swatches></div></div>
@@ -279,16 +385,36 @@ export function eventEditor(host, opts) {
       const sec = dlg.$('[data-sec="when"]');
       const f = F();
       const repeating = st.scope === "series" && ev.repeat.freq !== "none";
-      const nextDay = !ev.all_day && f.t2 <= f.t1;
+      if (anchorOf("start") || anchorOf("end")) loadSun(f.date);
+      const nextDay = !ev.all_day && timeOf("end") <= timeOf("start");
+      const bound = (which, label) => {
+        const anchor = anchorOf(which);
+        const key = which === "start" ? "t1" : "t2";
+        const choice = sunAllowed()
+          ? `<select class="inp" data-anchor="${which}">${["fixed", "sunrise", "sunset"]
+              .map(
+                (k) =>
+                  `<option value="${k}" ${(anchor ? anchor.event : "fixed") === k ? "selected" : ""}>${esc(k === "fixed" ? T.time_fixed : T[k])}</option>`,
+              )
+              .join("")}</select>`
+          : "";
+        const input = anchor
+          ? `<input type="number" class="inp num" step="5" min="${-SUN_LIMIT}" max="${SUN_LIMIT}" data-offset="${which}" value="${Number(anchor.offset) || 0}" title="${esc(T.offset_min)}">`
+          : `<input type="time" class="inp" step="300" data-w="${key}" value="${f[key]}">`;
+        const info = anchor
+          ? `<small class="hint">${esc(T.sun_on(timeOf(which), fmtDay(wm(f.date), T._lang, { day: "numeric", month: "short" })))}</small>`
+          : "";
+        return `<div class="fld sm bound"><span>${label}</span><div class="row tight">${choice}${input}</div>${info}</div>`;
+      };
       sec.innerHTML = `<div class="fld"><span>${esc(T.when)}</span>
         <label class="tgl"><input type="checkbox" data-allday ${ev.all_day ? "checked" : ""}><span></span>${esc(T.all_day)}</label>
         ${
           ev.all_day
             ? `<div class="row"><label class="fld sm"><span>${esc(repeating ? T.from_date : T.start)}</span><input type="date" class="inp" data-w="d1" value="${f.d1}"></label>
                <label class="fld sm"><span>${esc(T.end)}</span><input type="date" class="inp" data-w="d2" value="${f.d2}"></label></div>`
-            : `<div class="row"><label class="fld sm"><span>${esc(repeating ? T.from_date : T.date)}</span><input type="date" class="inp" data-w="date" value="${f.date}"></label>
-               <label class="fld sm"><span>${esc(T.start)}</span><input type="time" class="inp" step="300" data-w="t1" value="${f.t1}"></label>
-               <label class="fld sm"><span>${esc(T.end)}${nextDay ? ` <em>(${esc(T.next_day)})</em>` : ""}</span><input type="time" class="inp" step="300" data-w="t2" value="${f.t2}"></label></div>`
+            : `<div class="row"><label class="fld sm date"><span>${esc(repeating ? T.from_date : T.date)}</span><input type="date" class="inp" data-w="date" value="${f.date}"></label></div>
+               <div class="row bounds">${bound("start", esc(T.start))}
+               ${bound("end", `${esc(T.end)}${nextDay ? ` <em>(${esc(T.next_day)})</em>` : ""}`)}</div>`
         }</div>`;
       sec.querySelector("[data-allday]").addEventListener("change", (x) => {
         ev.all_day = x.target.checked;
@@ -297,13 +423,23 @@ export function eventEditor(host, opts) {
       sec.querySelectorAll("[data-w]").forEach((inp) =>
         inp.addEventListener("change", () => {
           F()[inp.dataset.w] = inp.value;
-          if (
-            inp.dataset.w === "date" &&
-            st.scope === "series" &&
-            ev.repeat.freq === "weekly" &&
-            !ev.repeat.weekdays.length
-          )
+          if (inp.dataset.w === "date" && st.scope === "series" && ["weekly", "monthly"].includes(ev.repeat.freq))
             sections.repeat();
+          sections.when();
+        }),
+      );
+      sec.querySelectorAll("[data-anchor]").forEach((sel) =>
+        sel.addEventListener("change", () => {
+          const which = sel.dataset.anchor;
+          const old = ev[`${which}_sun`];
+          ev[`${which}_sun`] = sel.value === "fixed" ? null : { event: sel.value, offset: old ? old.offset : 0 };
+          sections.when();
+        }),
+      );
+      sec.querySelectorAll("[data-offset]").forEach((inp) =>
+        inp.addEventListener("change", () => {
+          const value = Math.max(-SUN_LIMIT, Math.min(SUN_LIMIT, Math.round(Number(inp.value) || 0)));
+          ev[`${inp.dataset.offset}_sun`].offset = value;
           sections.when();
         }),
       );
@@ -332,7 +468,7 @@ export function eventEditor(host, opts) {
         }
         ${
           r.freq !== "none"
-            ? `<div class="row">
+            ? `<div class="row pairs">
                 <label class="fld sm"><span>${esc(T.until)}</span><input type="date" class="inp" data-r="until" value="${r.until || ""}"></label>
                 <label class="fld sm"><span>${esc(T.holidays)}</span><select class="inp" data-r="holidays">
                   ${["ignore", "exclude", "only"].map((h) => `<option value="${h}" ${r.holidays === h ? "selected" : ""}>${esc(T[`holidays_${h}`])}</option>`).join("")}
@@ -341,6 +477,20 @@ export function eventEditor(host, opts) {
                   opts.shared?.school_calendar || r.period !== "always"
                     ? `<label class="fld sm"><span>${esc(T.period)}</span><select class="inp" data-r="period">
                   ${["always", "school", "vacation"].map((p) => `<option value="${p}" ${r.period === p ? "selected" : ""}>${esc(T.periods[p])}</option>`).join("")}
+                </select></label>`
+                    : ""
+                }
+                ${
+                  r.freq === "monthly"
+                    ? `<label class="fld sm"><span>${esc(T.monthly_on)}</span><select class="inp" data-r="monthly">
+                  ${["day", "weekday", "last_weekday"].map((m) => `<option value="${m}" ${r.monthly === m ? "selected" : ""}>${esc(monthlyLabel(wm(form.date), m, T))}</option>`).join("")}
+                </select></label>`
+                    : ""
+                }
+                ${
+                  ["daily", "weekly"].includes(r.freq)
+                    ? `<label class="fld sm"><span>${esc(T.weeks)}</span><select class="inp" data-r="weeks">
+                  ${["all", "even", "odd"].map((w) => `<option value="${w}" ${r.weeks === w ? "selected" : ""}>${esc(T.weeks_modes[w])}</option>`).join("")}
                 </select></label>`
                     : ""
                 }</div>`
@@ -383,7 +533,10 @@ export function eventEditor(host, opts) {
               `<span class="pill">${esc(fmtDay(wm(d), T._lang, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))}<button data-rm="${key}:${d}">×</button></span>`,
           )
           .join("");
-      const cals = calendars();
+      const chosen = r.calendars || [];
+      const free = calendars().filter((c) => !chosen.includes(c.entity_id));
+      const choice = (key, modes) =>
+        `<select class="inp" data-cal-${key}>${modes.map((m) => `<option value="${m}" ${r[`calendar_${key}`] === m ? "selected" : ""}>${esc(T[`calendar_${m}`])}</option>`).join("")}</select>`;
       sec.innerHTML =
         ["exclude", "include"]
           .map(
@@ -392,16 +545,17 @@ export function eventEditor(host, opts) {
           )
           .join("") +
         `<div class="fld"><span>${esc(T.calendar_condition)}</span><p class="hint">${esc(T.calendar_hint)}</p>
-          <div class="row">
-            <select class="inp" data-cal><option value="">${esc(T.none)}</option>${cals
-              .map(
-                (c) =>
-                  `<option value="${esc(c.entity_id)}" ${r.calendar === c.entity_id ? "selected" : ""}>${esc(friendlyName(hass, c.entity_id))}</option>`,
-              )
-              .join("")}</select>
-            ${r.calendar ? `<select class="inp" data-cal-mode>${["exclude", "only"].map((m) => `<option value="${m}" ${r.calendar_mode === m ? "selected" : ""}>${esc(T[`calendar_${m}`])}</option>`).join("")}</select>` : ""}
-          </div></div>`;
-      const n = (r.exclude || []).length + (r.include || []).length + (r.calendar ? 1 : 0);
+          <div class="pills">${chosen
+            .map(
+              (id) =>
+                `<span class="pill">${esc(friendlyName(hass, id))}<button data-rm-cal="${esc(id)}">×</button></span>`,
+            )
+            .join("")}
+            ${free.length ? `<select class="inp" data-cal><option value="">${esc(T.add_calendar)}</option>${free.map((c) => `<option value="${esc(c.entity_id)}">${esc(friendlyName(hass, c.entity_id))}</option>`).join("")}</select>` : ""}
+          </div>
+          ${chosen.length ? `<div class="row">${choice("mode", ["exclude", "only"])}${chosen.length > 1 ? choice("match", ["any", "all"]) : ""}</div>` : ""}
+          </div>`;
+      const n = (r.exclude || []).length + (r.include || []).length + chosen.length;
       dlg.$("[data-count]").textContent = n ? ` · ${n}` : "";
       sec.querySelectorAll("[data-rm]").forEach((b) =>
         b.addEventListener("click", () => {
@@ -418,11 +572,64 @@ export function eventEditor(host, opts) {
           sections.exceptions();
         }),
       );
-      sec.querySelector("[data-cal]").addEventListener("change", (x) => {
-        r.calendar = x.target.value || null;
+      sec.querySelector("[data-cal]")?.addEventListener("change", (x) => {
+        if (x.target.value) r.calendars = [...chosen, x.target.value];
         sections.exceptions();
       });
+      sec.querySelectorAll("[data-rm-cal]").forEach((b) =>
+        b.addEventListener("click", () => {
+          r.calendars = chosen.filter((id) => id !== b.dataset.rmCal);
+          sections.exceptions();
+        }),
+      );
       sec.querySelector("[data-cal-mode]")?.addEventListener("change", (x) => (r.calendar_mode = x.target.value));
+      sec.querySelector("[data-cal-match]")?.addEventListener("change", (x) => (r.calendar_match = x.target.value));
+    },
+    conditions() {
+      const sec = dlg.$('[data-sec="conditions"]');
+      const rows = ev.conditions
+        .map((c, i) => {
+          const current = hass.states[c.entity_id];
+          const states = new Set(
+            [current?.state, ...(current?.attributes?.options || []), "on", "off", "home", "not_home"].filter(Boolean),
+          );
+          return `<div class="row tight cond" data-cond="${i}">
+            <input class="inp grow" list="agenda-entities" data-c="entity_id" value="${esc(c.entity_id || "")}" placeholder="${esc(T.cond_entity)}">
+            <select class="inp" data-c="not">
+              <option value="" ${c.not ? "" : "selected"}>${esc(T.cond_is)}</option>
+              <option value="1" ${c.not ? "selected" : ""}>${esc(T.cond_is_not)}</option>
+            </select>
+            <input class="inp" list="agenda-states-${i}" data-c="state" value="${esc(c.state || "")}" placeholder="${esc(T.state)}">
+            <datalist id="agenda-states-${i}">${[...states].map((s) => `<option value="${esc(s)}"></option>`).join("")}</datalist>
+            <button class="ic" data-cond-rm="${i}" title="${esc(T.delete)}"><ha-icon icon="mdi:close"></ha-icon></button>
+          </div>`;
+        })
+        .join("");
+      const entities = Object.keys(hass.states).sort();
+      sec.innerHTML = `<p class="hint">${esc(T.conditions_hint)}</p>${rows}
+        <datalist id="agenda-entities">${entities.map((e) => `<option value="${esc(e)}">${esc(friendlyName(hass, e))}</option>`).join("")}</datalist>
+        <button class="btn flat" data-cond-add><ha-icon icon="mdi:plus"></ha-icon>${esc(T.add_condition)}</button>`;
+      dlg.$("[data-ccount]").textContent = ev.conditions.length ? ` · ${ev.conditions.length}` : "";
+      sec.querySelectorAll("[data-cond]").forEach((row) => {
+        const i = Number(row.dataset.cond);
+        row.querySelectorAll("[data-c]").forEach((inp) =>
+          inp.addEventListener("change", () => {
+            const key = inp.dataset.c;
+            ev.conditions[i][key] = key === "not" ? inp.value === "1" : inp.value.trim();
+            if (key === "entity_id") sections.conditions();
+          }),
+        );
+      });
+      sec.querySelectorAll("[data-cond-rm]").forEach((b) =>
+        b.addEventListener("click", () => {
+          ev.conditions.splice(Number(b.dataset.condRm), 1);
+          sections.conditions();
+        }),
+      );
+      sec.querySelector("[data-cond-add]").addEventListener("click", () => {
+        ev.conditions.push({ entity_id: "", state: "", not: false });
+        sections.conditions();
+      });
     },
     swatches() {
       const box = dlg.$("[data-swatches]");
@@ -489,13 +696,25 @@ export function eventEditor(host, opts) {
       out.start = f.d1;
       out.end = wallDate(wm(f.d2 < f.d1 ? f.d1 : f.d2) + DAY);
     } else {
-      out.start = `${f.date}T${f.t1}`;
-      const endDay = f.t2 <= f.t1 ? wallDate(wm(f.date) + DAY) : f.date;
-      out.end = `${endDay}T${f.t2}`;
+      // with a sun anchor the stored time is the one of the first day, kept as a fallback
+      const t1 = timeOf("start");
+      const t2 = timeOf("end");
+      out.start = `${f.date}T${t1}`;
+      const endDay = t2 <= t1 ? wallDate(wm(f.date) + DAY) : f.date;
+      out.end = `${endDay}T${t2}`;
     }
+    if (!sunAllowed()) {
+      out.start_sun = null;
+      out.end_sun = null;
+    }
+    out.conditions = ev.conditions
+      .filter((c) => c.entity_id && c.state)
+      .map((c) => ({ entity_id: c.entity_id, state: c.state, not: Boolean(c.not) }));
     if (out.repeat.freq === "weekly" && !out.repeat.weekdays.length) out.repeat.weekdays = [weekday(wm(out.start))];
     if (out.repeat.freq !== "weekly") out.repeat.weekdays = [];
-    if (!out.repeat.calendar) out.repeat.calendar = null;
+    if (out.repeat.freq !== "monthly") out.repeat.monthly = "day";
+    if (!["daily", "weekly"].includes(out.repeat.freq)) out.repeat.weeks = "all";
+    if (out.repeat.calendars.length < 2) out.repeat.calendar_match = "any";
     out.name = (out.name || "").trim();
     out.icon = (out.icon || "").trim() || null;
     return out;
@@ -593,9 +812,12 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
     country: shared?.configured || null,
     subdiv: shared?.subdiv || null,
     school: shared?.school_calendar || null,
+    allow: Boolean(shared?.allow_users),
     options: null,
   };
-  const holInitial = JSON.stringify([hol.country, hol.subdiv, hol.school]);
+  const holInitial = JSON.stringify([hol.country, hol.subdiv, hol.school, hol.allow]);
+  cfg.follow_absence = cfg.follow_absence !== false;
+  cfg.away_state = cfg.away_state ?? null;
   const dlg = new Dialog(host, { title: `${T.settings} · ${agenda.name}`, wide: true });
 
   const body = `<label class="fld"><span>${esc(T.name)}</span><input class="inp" data-name value="${esc(name)}"></label>
@@ -604,6 +826,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
     <section data-sec="entities"></section>
     <section data-sec="default"></section>
     <label class="tgl" data-resync-row><input type="checkbox" data-resync ${cfg.resync_on_start ? "checked" : ""}><span></span>${esc(T.resync_on_start)}</label>
+    <section data-sec="absence"></section>
     <details class="more"><summary>${esc(T.holidays_title)}</summary><div data-sec="holidays"></div></details>`;
   const footer = `<button class="btn danger flat" data-del>${esc(T.delete_agenda)}</button>
     <button class="btn flat" data-apply>${esc(T.resync_now)}</button><span class="grow"></span>
@@ -650,6 +873,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
           sections.kind();
           sections.entities();
           sections.default();
+          sections.absence();
         }),
       );
       dlg.$("[data-resync-row]").hidden = cfg.kind === "none";
@@ -716,6 +940,27 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
         rerender: sections.default,
       });
     },
+    absence() {
+      const sec = dlg.$('[data-sec="absence"]');
+      const picker =
+        cfg.follow_absence && cfg.kind !== "none"
+          ? `<div class="fld"><span>${esc(T.away_state)}</span>${kinds.statePicker(hass, view(), cfg.away_state, T, { allowNone: true, noneLabel: T.away_default })}</div>`
+          : "";
+      sec.innerHTML = `<label class="tgl"><input type="checkbox" data-follow ${cfg.follow_absence ? "checked" : ""}><span></span>${esc(T.follow_absence)}</label>${picker}`;
+      sec.querySelector("[data-follow]").addEventListener("change", (x) => {
+        cfg.follow_absence = x.target.checked;
+        sections.absence();
+      });
+      if (picker)
+        kinds.bindState(sec, {
+          hass,
+          agenda: view(),
+          T,
+          get: () => cfg.away_state,
+          set: (v) => (cfg.away_state = v),
+          rerender: sections.absence,
+        });
+    },
     async holidays() {
       const sec = dlg.$('[data-sec="holidays"]');
       const lang = T._lang;
@@ -756,7 +1001,9 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
             )
             .join("")}
         </select></label>
-        <p class="hint">${esc(T.school_calendar_hint)}</p>`;
+        <p class="hint">${esc(T.school_calendar_hint)}</p>
+        <label class="tgl"><input type="checkbox" data-allow ${hol.allow ? "checked" : ""}><span></span>${esc(T.allow_users)}</label>`;
+      sec.querySelector("[data-allow]").addEventListener("change", (x) => (hol.allow = x.target.checked));
       sec.querySelector("[data-school]").addEventListener("change", (x) => (hol.school = x.target.value || null));
       sec.querySelector("[data-country]").addEventListener("change", (x) => {
         hol.country = x.target.value || null;
@@ -783,14 +1030,17 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
         entities: cfg.kind === "none" ? [] : cfg.entities,
         default_state: cfg.kind === "none" ? null : (cfg.default_state ?? null),
         resync_on_start: !!cfg.resync_on_start,
+        follow_absence: !!cfg.follow_absence,
+        away_state: cfg.kind === "none" ? null : (cfg.away_state ?? null),
       },
     });
-    if (JSON.stringify([hol.country, hol.subdiv, hol.school]) !== holInitial) {
+    if (JSON.stringify([hol.country, hol.subdiv, hol.school, hol.allow]) !== holInitial) {
       await ws({
         type: "agenda/shared/save",
         country: hol.country,
         subdiv: hol.subdiv,
         school_calendar: hol.school,
+        allow_users: hol.allow,
       });
     }
   };
@@ -856,6 +1106,18 @@ export const DIALOG_STYLES = `
   select.inp { width: auto; min-width: 160px; }
   .inline { display: inline-flex; align-items: center; gap: 8px; color: var(--secondary-text-color); }
   .hint { margin: 0; font-size: 12.5px; color: var(--secondary-text-color); }
+  .row.tight { gap: 6px; flex-wrap: nowrap; align-items: center; }
+  .row.bounds { align-items: flex-start; }
+  .row.pairs > .fld.sm { min-width: 200px; }
+  .row.pairs select.inp { width: 100%; min-width: 0; }
+  .fld.date { flex: 0 1 220px; }
+  .fld.bound { min-width: 230px; }
+  .fld.bound select.inp { flex: 1 1 auto; min-width: 0; }
+  .fld.bound input.inp { flex: 0 0 auto; width: auto; }
+  .fld.bound .inp.num { width: 72px; }
+  .cond { margin: 8px 0; }
+  .cond .grow { flex: 1; min-width: 0; }
+  .cond select.inp, .cond input.inp:not(.grow) { width: auto; max-width: 150px; }
   h4 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .chip { font: inherit; border: 2px solid transparent; border-radius: 99px; padding: 6px 14px; cursor: pointer; font-weight: 600; font-size: 13.5px;

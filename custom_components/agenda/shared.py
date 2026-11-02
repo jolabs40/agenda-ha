@@ -1,18 +1,22 @@
-"""Settings shared by all agendas: public holidays and the school holiday calendar.
+"""Settings shared by all agendas: public holidays, the school holiday calendar,
+the absence mode and who may edit.
 
 Holidays default to the core country; the panel can pick another country and a
-subdivision.
+subdivision. Sun times come from the home location.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 import logging
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
 from . import recurrence
@@ -71,6 +75,12 @@ class Shared:
         self.subdiv: str | None = None
         self.school_calendar: str | None = None
         self._holidays = None
+        # absence mode: {"until": "2026-11-10T18:00" | None} while away, else None
+        self.absence: dict[str, Any] | None = None
+        self.allow_users = False  # non-admin users may edit events
+        self._sun_cache: dict[tuple[date, str], datetime | None] = {}
+        self._absence_listeners: list[Callable[[], Any]] = []
+        self._unsub_absence: Callable[[], None] | None = None
 
     @property
     def effective_country(self) -> str | None:
@@ -82,9 +92,13 @@ class Shared:
         self.country = settings.get("country")
         self.subdiv = settings.get("subdiv")
         self.school_calendar = data.get("school_calendar")
+        self.absence = data.get("absence")
+        self.allow_users = bool(data.get("allow_users", False))
         await self.async_rebuild()
+        self._watch_absence_end()
 
     async def async_rebuild(self) -> None:
+        self._sun_cache.clear()
         country = self.effective_country
         if not country:
             self._holidays = None
@@ -93,17 +107,91 @@ class Shared:
             _build_holidays, country, self.subdiv, self.hass.config.language
         )
 
-    async def async_set(self, country: str | None, subdiv: str | None, school_calendar: str | None) -> None:
-        self.country = country or None
-        self.subdiv = subdiv or None
-        self.school_calendar = school_calendar or None
+    async def _async_save(self) -> None:
         await self._store.async_save(
             {
                 "holidays": {"country": self.country, "subdiv": self.subdiv},
                 "school_calendar": self.school_calendar,
+                "absence": self.absence,
+                "allow_users": self.allow_users,
             }
         )
+
+    async def async_set(
+        self, country: str | None, subdiv: str | None, school_calendar: str | None, allow_users: bool | None = None
+    ) -> None:
+        self.country = country or None
+        self.subdiv = subdiv or None
+        self.school_calendar = school_calendar or None
+        if allow_users is not None:
+            self.allow_users = allow_users
+        await self._async_save()
         await self.async_rebuild()
+
+    def sun(self, day: date, which: str) -> datetime | None:
+        """Naive local time of sunrise or sunset on a local day."""
+        key = (day, which)
+        if key not in self._sun_cache:
+            point = get_astral_event_date(self.hass, which, day)
+            tz = dt_util.get_default_time_zone()
+            self._sun_cache[key] = point.astimezone(tz).replace(tzinfo=None, second=0, microsecond=0) if point else None
+            if len(self._sun_cache) > 4000:
+                self._sun_cache.clear()
+        return self._sun_cache[key]
+
+    def absence_until(self) -> datetime | None:
+        if not self.absence or not self.absence.get("until"):
+            return None
+        return datetime.fromisoformat(self.absence["until"]).replace(tzinfo=dt_util.get_default_time_zone())
+
+    def absent_at(self, at: datetime) -> bool:
+        if self.absence is None:
+            return False
+        until = self.absence_until()
+        return until is None or at < until
+
+    @callback
+    def async_on_absence_change(self, listener: Callable[[], Any]) -> Callable[[], None]:
+        self._absence_listeners.append(listener)
+        return lambda: self._absence_listeners.remove(listener)
+
+    async def async_set_absence(self, active: bool, until: str | None = None) -> None:
+        """Start (until a local time, or until stopped) or stop the absence mode."""
+        if active and until:
+            datetime.fromisoformat(until)
+        self.absence = {"until": until or None} if active else None
+        await self._async_save()
+        self._watch_absence_end()
+        await self._async_absence_changed()
+
+    async def _async_absence_changed(self) -> None:
+        for listener in list(self._absence_listeners):
+            await listener()
+
+    @callback
+    def _watch_absence_end(self) -> None:
+        if self._unsub_absence:
+            self._unsub_absence()
+            self._unsub_absence = None
+        until = self.absence_until()
+        if until is None:
+            return
+        if until <= dt_util.now():
+            self.absence = None
+            self.hass.async_create_task(self._async_save())
+            return
+
+        @callback
+        def _ended(_now: datetime) -> None:
+            self._unsub_absence = None
+            self.absence = None
+            self.hass.async_create_task(self._async_end_absence())
+
+        self._unsub_absence = async_track_point_in_time(self.hass, _ended, until)
+
+    async def _async_end_absence(self) -> None:
+        await self._async_save()
+        await self._async_absence_changed()
 
     async def async_options(self, country: str | None) -> dict[str, Any]:
         return await self.hass.async_add_executor_job(_holiday_options, country)
@@ -158,4 +246,6 @@ class Shared:
             "subdiv": self.subdiv,
             "ha_country": self.hass.config.country,
             "school_calendar": self.school_calendar,
+            "absence": self.absence,
+            "allow_users": self.allow_users,
         }

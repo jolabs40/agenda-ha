@@ -3,6 +3,10 @@
 At each transition the end actions run first, then the linked entities get the
 wanted state, then the start actions run. Handling ends before starts keeps the
 end of one event from undoing the next one when they are back to back.
+
+An event with conditions takes charge (state and start actions) only while they
+hold; its end actions always run. During the absence mode an agenda that follows
+it keeps its away state and runs no action.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from .const import (
     CALENDAR_FUTURE,
     CALENDAR_PAST,
     CALENDAR_REFRESH,
+    CONDITION_DELAY_S,
     DEFAULT_SETTINGS,
     DOMAIN,
     PALETTE,
@@ -92,6 +97,9 @@ class Agenda:
         self._calendars_ready = False
         self._unsub_calendars: list[Callable[[], None]] = []
         self._refresh_pending: Callable[[], None] | None = None
+        self._unsub_conditions: Callable[[], None] | None = None
+        self._condition_pending: Callable[[], None] | None = None
+        self._unsub_absence: Callable[[], None] | None = None
 
     @property
     def entry_id(self) -> str:
@@ -162,6 +170,7 @@ class Agenda:
             is_holiday=self.shared.is_holiday,
             calendar_days=days,
             vacation_days=days.get(school, set()) if school else None,
+            sun=self.shared.sun,
         )
 
     def occurrences(
@@ -172,20 +181,34 @@ class Agenda:
     def active(self, at: datetime | None = None) -> list[recurrence.Occurrence]:
         return recurrence.active_at(self.events, self.tz, at or dt_util.utcnow(), self.context())
 
+    def conditions_hold(self, event: dict[str, Any]) -> bool:
+        """Whether the event's entity conditions hold now (all of them)."""
+        for cond in event.get("conditions") or []:
+            state = self.hass.states.get(cond["entity_id"])
+            matches = state is not None and state.state == str(cond.get("state", ""))
+            if matches == bool(cond.get("not")):
+                return False
+        return True
+
+    def absent(self, at: datetime | None = None) -> bool:
+        return bool(self.settings.get("follow_absence", True)) and self.shared.absent_at(at or dt_util.utcnow())
+
     def desired(self, at: datetime | None = None) -> tuple[dict[str, Any] | None, recurrence.Occurrence | None]:
-        return recurrence.desired_state(
-            self.events,
-            self.tz,
-            at or dt_util.utcnow(),
-            self.settings.get("default_state"),
-            self.context(),
-        )
+        at = at or dt_util.utcnow()
+        default = self.settings.get("default_state")
+        if self.absent(at):
+            return self.settings.get("away_state") or default, None
+        # conditions are read now: a future state assumes they keep their value
+        events = [event for event in self.events if self.conditions_hold(event)]
+        return recurrence.desired_state(events, self.tz, at, default, self.context())
 
     @callback
     def async_start(self) -> None:
         self._last = dt_util.utcnow()
         self._schedule()
         self._track_calendars()
+        self._track_conditions()
+        self._unsub_absence = self.shared.async_on_absence_change(self.async_absence_changed)
 
     @callback
     def async_stop(self) -> None:
@@ -193,6 +216,10 @@ class Agenda:
             self._unsub_timer()
             self._unsub_timer = None
         self._untrack_calendars()
+        self._untrack_conditions()
+        if self._unsub_absence:
+            self._unsub_absence()
+            self._unsub_absence = None
 
     @callback
     def _schedule(self) -> None:
@@ -202,6 +229,10 @@ class Agenda:
         self.next_change = recurrence.next_transition(self.events, self.tz, self._last, self.context())
         if self.next_change is not None:
             self._unsub_timer = async_track_point_in_time(self.hass, self._on_timer, self.next_change)
+        until = self.shared.absence_until()
+        if self.absent() and until is not None and (self.next_change is None or until < self.next_change):
+            # what the panel shows; the shared settings end the absence themselves
+            self.next_change = until
 
     @callback
     def _on_timer(self, _now: datetime) -> None:
@@ -218,9 +249,12 @@ class Agenda:
             await self.async_refresh_calendars(apply=False)
         occs = self.occurrences(since, until + timedelta(seconds=1))
         ended = sorted((o for o in occs if since < o.end <= until), key=lambda o: o.end)
-        started = sorted((o for o in occs if since < o.start <= until), key=lambda o: o.start)
+        started = sorted(
+            (o for o in occs if since < o.start <= until and self.conditions_hold(self.event(o.event_id))),
+            key=lambda o: o.start,
+        )
         self._notify()
-        if not self.enabled or not (ended or started):
+        if not self.enabled or self.absent() or not (ended or started):
             return
         async with self._run_lock:
             for occ in ended:
@@ -295,7 +329,9 @@ class Agenda:
                 return
 
     def condition_calendars(self) -> set[str]:
-        calendars = {calendar for event in self.events if (calendar := (event.get("repeat") or {}).get("calendar"))}
+        calendars = {
+            calendar for event in self.events for calendar in (event.get("repeat") or {}).get("calendars") or ()
+        }
         school = self.shared.school_calendar
         if school and any(
             (event.get("repeat") or {}).get("period", recurrence.PERIOD_ALWAYS) != recurrence.PERIOD_ALWAYS
@@ -417,6 +453,7 @@ class Agenda:
             # a new condition calendar must be read before deciding anything
             self._track_calendars(refresh=False)
             await self.async_refresh_calendars(apply=False)
+        self._track_conditions()
         self._last = dt_util.utcnow()
         self._schedule()
         after, _ = self.desired()
@@ -513,6 +550,86 @@ class Agenda:
             await self.async_apply_state(force=True)
         self._notify()
 
+    def condition_entities(self) -> set[str]:
+        return {cond["entity_id"] for event in self.events for cond in event.get("conditions") or []}
+
+    @callback
+    def _track_conditions(self) -> None:
+        self._untrack_conditions()
+        entities = self.condition_entities()
+        if entities:
+            self._unsub_conditions = async_track_state_change_event(
+                self.hass, sorted(entities), self._on_condition_change
+            )
+
+    @callback
+    def _untrack_conditions(self) -> None:
+        if self._unsub_conditions:
+            self._unsub_conditions()
+            self._unsub_conditions = None
+        if self._condition_pending:
+            self._condition_pending()
+            self._condition_pending = None
+
+    @callback
+    def _on_condition_change(self, _event: Event) -> None:
+        if self._condition_pending:
+            self._condition_pending()
+        self._condition_pending = async_call_later(self.hass, CONDITION_DELAY_S, self._on_condition_settled)
+
+    @callback
+    def _on_condition_settled(self, _now: datetime) -> None:
+        self._condition_pending = None
+        self.hass.async_create_background_task(self._async_reapply(), f"{DOMAIN} {self.name} condition")
+
+    async def _async_reapply(self) -> None:
+        async with self._run_lock:
+            await self.async_apply_state()
+        self._notify()
+
+    async def async_absence_changed(self) -> None:
+        """The absence mode started or ended: reschedule and apply the state."""
+        self._last = dt_util.utcnow()
+        self._schedule()
+        async with self._run_lock:
+            await self.async_apply_state(force=True)
+        self._notify()
+
+    def _named(self, name: str | None) -> list[dict[str, Any]]:
+        """Events with this name (case insensitive), or all events without a name."""
+        if not name:
+            return list(self.events)
+        found = [event for event in self.events if (event.get("name") or "").strip().lower() == name.strip().lower()]
+        if not found:
+            raise HomeAssistantError(f"no event named '{name}' in agenda {self.name}")
+        return found
+
+    async def async_skip_next(self, name: str | None = None) -> str | None:
+        """Remove the next occurrence to start (of the named event); returns its day."""
+        now = dt_util.utcnow()
+        ids = {event["id"] for event in self._named(name)}
+        upcoming = [
+            occ for occ in self.occurrences(now, now + timedelta(days=400)) if occ.event_id in ids and occ.start > now
+        ]
+        if not upcoming:
+            return None
+        first = min(upcoming, key=lambda occ: occ.start)
+        await self.async_detach(first.event_id, first.day.isoformat(), None)
+        return first.day.isoformat()
+
+    async def async_change_dates(self, name: str, days: list[date], add: bool) -> None:
+        """Add occurrences on these days, or remove them (for automations)."""
+        before, _ = self.desired()
+        for event in self._named(name):
+            repeat = event.setdefault("repeat", {})
+            include, exclude = set(repeat.get("include") or []), set(repeat.get("exclude") or [])
+            for day in days:
+                iso = day.isoformat()
+                (include if add else exclude).add(iso)
+                (exclude if add else include).discard(iso)
+            repeat["include"], repeat["exclude"] = sorted(include), sorted(exclude)
+        await self._async_changed(before)
+
     async def async_context_changed(self) -> None:
         """Reschedule after the shared settings changed."""
         before, _ = self.desired()
@@ -564,6 +681,7 @@ class Agenda:
             "next_state": self.desired(self.next_change)[0] if self.next_change else None,
             "state": state,
             "state_event": occ.event_id if occ else None,
+            "absent": self.absent(now),
             "agenda_entities": self.agenda_entities(),
         }
 

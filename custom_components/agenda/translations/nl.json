@@ -1,0 +1,92 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nieuwe agenda",
+        "description": "Eén agenda per kamer of apparaat. Gebeurtenissen, herhalingen en de aangestuurde apparaten stel je in het Agenda-paneel in.",
+        "data": {
+          "name": "Naam"
+        }
+      }
+    },
+    "error": {
+      "empty": "De naam mag niet leeg zijn."
+    },
+    "abort": {
+      "already_configured": "Er bestaat al een agenda met deze naam."
+    }
+  },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Actief"
+      }
+    },
+    "sensor": {
+      "current": {
+        "name": "Nu"
+      },
+      "next_change": {
+        "name": "Volgende wijziging"
+      }
+    }
+  },
+  "services": {
+    "resync": {
+      "name": "Opnieuw synchroniseren",
+      "description": "Zet de apparaten die de agenda aanstuurt terug in de toestand die ze nu wil."
+    },
+    "skip_next": {
+      "name": "Volgende gebeurtenis overslaan",
+      "description": "Verwijdert de eerstvolgende gebeurtenis, van één gebeurtenis of van welke gebeurtenis van de agenda dan ook.",
+      "fields": {
+        "event": {
+          "name": "Gebeurtenis",
+          "description": "Naam van de gebeurtenis. Leeg: de eerstvolgende, welke het ook is."
+        }
+      }
+    },
+    "add_dates": {
+      "name": "Datums toevoegen",
+      "description": "Voegt op deze dagen gebeurtenissen toe, bovenop de herhaling.",
+      "fields": {
+        "event": {
+          "name": "Gebeurtenis",
+          "description": "Naam van de gebeurtenis (alle gebeurtenissen met deze naam)."
+        },
+        "dates": {
+          "name": "Datums",
+          "description": "Toe te voegen dagen, bijvoorbeeld 2026-12-24."
+        }
+      }
+    },
+    "remove_dates": {
+      "name": "Datums verwijderen",
+      "description": "Verwijdert de gebeurtenissen op deze dagen.",
+      "fields": {
+        "event": {
+          "name": "Gebeurtenis",
+          "description": "Naam van de gebeurtenis (alle gebeurtenissen met deze naam)."
+        },
+        "dates": {
+          "name": "Datums",
+          "description": "Te verwijderen dagen, bijvoorbeeld 2026-12-24."
+        }
+      }
+    },
+    "set_absence": {
+      "name": "Afwezigheidsmodus starten",
+      "description": "Agenda's die de afwezigheidsmodus volgen, houden hun afwezigheidstoestand en voeren tot het einde geen actie uit.",
+      "fields": {
+        "until": {
+          "name": "Tot",
+          "description": "Einde van de afwezigheid. Leeg: met de hand stoppen."
+        }
+      }
+    },
+    "end_absence": {
+      "name": "Afwezigheidsmodus beëindigen",
+      "description": "De agenda's volgen weer hun programma."
+    }
+  }
+}

@@ -4,314 +4,8 @@
 // They are handled as "wall minutes" (minutes since the epoch of the UTC date
 // with the same digits) so nothing depends on the browser's time zone.
 
-const TEXTS = {
-  fr: {
-    title: "Agenda",
-    week: "Semaine",
-    house: "Maison",
-    list: "Liste",
-    today: "Aujourd'hui",
-    all: "Tous",
-    new_event: "Événement",
-    new_agenda: "Nouvel agenda",
-    agenda_name: "Nom de l'agenda",
-    settings: "Réglages",
-    support: "Soutenir Agenda sur Ko-fi",
-    active: "Actif",
-    paused: "Suspendu",
-    now: "En ce moment",
-    next: "Ensuite",
-    at: "à",
-    none: "Aucun",
-    no_agenda: "Aucun agenda pour l'instant.",
-    no_agenda_hint: "Un agenda par pièce ou par appareil : créez le premier.",
-    no_event: "Aucun événement.",
-    default_state: "Hors événement",
-    edit_event: "Modifier l'événement",
-    create_event: "Nouvel événement",
-    occurrence_of: "Occurrence du",
-    scope_series: "Toute la série",
-    scope_once: "Ce jour seulement",
-    setpoint: "Consigne",
-    state: "État",
-    temperature: "Température",
-    name: "Nom",
-    name_hint: "Facultatif : sinon l'état s'affiche",
-    when: "Quand",
-    all_day: "Toute la journée",
-    date: "Date",
-    from_date: "À partir du",
-    start: "Début",
-    end: "Fin",
-    next_day: "le lendemain",
-    repeat: "Répétition",
-    once: "Une seule fois",
-    daily: "Tous les jours",
-    weekly: "Toutes les semaines",
-    monthly: "Tous les mois",
-    every: "Tous les",
-    every_f: "Toutes les",
-    days_unit: "jours",
-    weeks_unit: "semaines",
-    months_unit: "mois",
-    until: "Jusqu'au",
-    holidays: "Jours fériés",
-    holidays_ignore: "Sans effet",
-    holidays_exclude: "Sauf les jours fériés",
-    holidays_only: "Seulement les jours fériés",
-    exceptions: "Exceptions",
-    excluded: "Jours retirés",
-    included: "Jours ajoutés",
-    calendar_condition: "Selon un calendrier",
-    calendar_hint: "Par exemple un calendrier des vacances scolaires ou des absences.",
-    calendar_exclude: "Sauf les jours où il a un événement",
-    calendar_only: "Seulement les jours où il a un événement",
-    add: "Ajouter",
-    look: "Apparence",
-    color: "Couleur",
-    auto: "Auto",
-    icon: "Icône",
-    start_actions: "Actions de début",
-    end_actions: "Actions de fin",
-    actions_hint: "Exécutées au début (ou à la fin) de chaque occurrence, comme dans une automatisation.",
-    note: "Note",
-    enabled_event: "Événement actif",
-    delete: "Supprimer",
-    duplicate: "Dupliquer",
-    cancel: "Annuler",
-    save: "Enregistrer",
-    close: "Fermer",
-    move_title: "Déplacer une occurrence répétée",
-    move_text: "Ce changement vaut-il pour ce jour seulement ou pour toute la série ?",
-    delete_title: "Supprimer",
-    delete_series_text: "Supprimer toute la série, ou seulement ce jour ?",
-    delete_text: "Supprimer cet événement ?",
-    delete_agenda_text: "Supprimer cet agenda et tous ses événements ?",
-    kind: "Ce que commande l'agenda",
-    kinds: {
-      none: "Rien",
-      climate: "Thermostats",
-      on_off: "Marche / arrêt",
-      cover: "Volets",
-      select: "Sélecteur",
-      number: "Valeur",
-    },
-    kind_hints: {
-      none: "Les événements ne font que lancer leurs actions de début et de fin.",
-      climate: "La consigne des événements est appliquée aux thermostats ; hors événement, celle ci-dessous.",
-      other: "L'état des événements est appliqué aux appareils ; hors événement, celui ci-dessous.",
-    },
-    kind_change: "Changer de type efface l'état des événements existants.",
-    entities: "Appareils commandés",
-    no_entity: "Aucun appareil de ce type.",
-    search: "Rechercher",
-    resync_on_start: "Recaler les appareils au démarrage de Home Assistant",
-    resync_now: "Appliquer maintenant",
-    delete_agenda: "Supprimer l'agenda",
-    holidays_title: "Réglages communs (tous les agendas)",
-    school_calendar: "Calendrier des vacances scolaires",
-    school_calendar_hint:
-      "Les événements répétés peuvent alors ne s'appliquer qu'en période scolaire ou que pendant les vacances.",
-    period: "Période",
-    periods: { always: "Toujours", school: "Période scolaire", vacation: "Vacances scolaires" },
-    vacation: "Vacances scolaires",
-    country: "Pays",
-    subdivision: "Région",
-    ha_country: (name) => `Pays de Home Assistant (${name})`,
-    no_ha_country: "Pays de Home Assistant (non défini)",
-    whole_country: "Tout le pays",
-    error: "Erreur",
-    yaml_hint: "Liste d'actions en YAML ou JSON, comme dans une automatisation.",
-    no_state: "Aucun",
-    off: "Arrêt",
-    on: "Marche",
-    light_on: "Allumé",
-    light_off: "Éteint",
-    open: "Ouvert",
-    closed: "Fermé",
-    position: "Position",
-    brightness: "Luminosité",
-    set_brightness: "Régler la luminosité",
-    option: "Option",
-    value: "Valeur",
-    n_on: (n, total) => `${n}/${total} en marche`,
-    presets: {
-      comfort: "Confort",
-      eco: "Éco",
-      frost: "Hors-gel",
-      boost: "Boost",
-      away: "Absent",
-      activity: "Activité",
-    },
-    weekdays_short: ["L", "M", "M", "J", "V", "S", "D"],
-    weekdays_long: ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"],
-    mon_fri: "Du lundi au vendredi",
-    weekend: "Le week-end",
-    every_day: "Tous les jours",
-    every_n_days: (n) => `Tous les ${n} jours`,
-    every_n_weeks: (n) => `Toutes les ${n} semaines`,
-    every_month: (d) => `Tous les mois, le ${d}`,
-    every_n_months: (n, d) => `Tous les ${n} mois, le ${d}`,
-    on_day: (d) => `Le ${d}`,
-    until_day: (d) => `jusqu'au ${d}`,
-    except_holidays: "sauf fériés",
-    only_holidays: "fériés seulement",
-    except_calendar: (name) => `sauf ${name}`,
-    only_calendar: (name) => `seulement ${name}`,
-    school_only: "en période scolaire",
-    vacation_only: "pendant les vacances",
-    n_exceptions: (n) => (n === 1 ? "1 exception" : `${n} exceptions`),
-  },
-  en: {
-    title: "Agenda",
-    week: "Week",
-    house: "House",
-    list: "List",
-    today: "Today",
-    all: "All",
-    new_event: "Event",
-    new_agenda: "New agenda",
-    agenda_name: "Agenda name",
-    settings: "Settings",
-    support: "Support Agenda on Ko-fi",
-    active: "Active",
-    paused: "Paused",
-    now: "Now",
-    next: "Next",
-    at: "at",
-    none: "None",
-    no_agenda: "No agenda yet.",
-    no_agenda_hint: "One agenda per room or device: create the first one.",
-    no_event: "No event.",
-    default_state: "Outside events",
-    edit_event: "Edit event",
-    create_event: "New event",
-    occurrence_of: "Occurrence of",
-    scope_series: "Whole series",
-    scope_once: "This day only",
-    setpoint: "Setpoint",
-    state: "State",
-    temperature: "Temperature",
-    name: "Name",
-    name_hint: "Optional: the state is shown otherwise",
-    when: "When",
-    all_day: "All day",
-    date: "Date",
-    from_date: "Starting",
-    start: "Start",
-    end: "End",
-    next_day: "next day",
-    repeat: "Repeat",
-    once: "Once",
-    daily: "Every day",
-    weekly: "Every week",
-    monthly: "Every month",
-    every: "Every",
-    every_f: "Every",
-    days_unit: "days",
-    weeks_unit: "weeks",
-    months_unit: "months",
-    until: "Until",
-    holidays: "Public holidays",
-    holidays_ignore: "No effect",
-    holidays_exclude: "Except public holidays",
-    holidays_only: "Public holidays only",
-    exceptions: "Exceptions",
-    excluded: "Removed days",
-    included: "Added days",
-    calendar_condition: "Depending on a calendar",
-    calendar_hint: "For instance a calendar of school holidays or absences.",
-    calendar_exclude: "Except on days it has an event",
-    calendar_only: "Only on days it has an event",
-    add: "Add",
-    look: "Appearance",
-    color: "Colour",
-    auto: "Auto",
-    icon: "Icon",
-    start_actions: "Start actions",
-    end_actions: "End actions",
-    actions_hint: "Run at the start (or end) of each occurrence, as in an automation.",
-    note: "Note",
-    enabled_event: "Event active",
-    delete: "Delete",
-    duplicate: "Duplicate",
-    cancel: "Cancel",
-    save: "Save",
-    close: "Close",
-    move_title: "Move a repeated occurrence",
-    move_text: "Does this change apply to this day only or to the whole series?",
-    delete_title: "Delete",
-    delete_series_text: "Delete the whole series, or this day only?",
-    delete_text: "Delete this event?",
-    delete_agenda_text: "Delete this agenda and all its events?",
-    kind: "What the agenda controls",
-    kinds: {
-      none: "Nothing",
-      climate: "Thermostats",
-      on_off: "On / off",
-      cover: "Covers",
-      select: "Selector",
-      number: "Value",
-    },
-    kind_hints: {
-      none: "Events only run their start and end actions.",
-      climate: "Event setpoints are applied to the thermostats; outside events, the one below.",
-      other: "Event states are applied to the devices; outside events, the one below.",
-    },
-    kind_change: "Changing the type clears the state of existing events.",
-    entities: "Controlled devices",
-    no_entity: "No device of this type.",
-    search: "Search",
-    resync_on_start: "Bring devices back to the agenda when Home Assistant starts",
-    resync_now: "Apply now",
-    delete_agenda: "Delete agenda",
-    holidays_title: "Shared settings (all agendas)",
-    school_calendar: "School holiday calendar",
-    school_calendar_hint: "Repeating events can then apply only during school term or only during school holidays.",
-    period: "Period",
-    periods: { always: "Always", school: "School term", vacation: "School holidays" },
-    vacation: "School holidays",
-    country: "Country",
-    subdivision: "Region",
-    ha_country: (name) => `Home Assistant's country (${name})`,
-    no_ha_country: "Home Assistant's country (not set)",
-    whole_country: "Whole country",
-    error: "Error",
-    yaml_hint: "List of actions in YAML or JSON, as in an automation.",
-    no_state: "None",
-    off: "Off",
-    on: "On",
-    light_on: "On",
-    light_off: "Off",
-    open: "Open",
-    closed: "Closed",
-    position: "Position",
-    brightness: "Brightness",
-    set_brightness: "Set the brightness",
-    option: "Option",
-    value: "Value",
-    n_on: (n, total) => `${n}/${total} on`,
-    presets: { comfort: "Comfort", eco: "Eco", frost: "Frost", boost: "Boost", away: "Away", activity: "Activity" },
-    weekdays_short: ["M", "T", "W", "T", "F", "S", "S"],
-    weekdays_long: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-    mon_fri: "Monday to Friday",
-    weekend: "Weekends",
-    every_day: "Every day",
-    every_n_days: (n) => `Every ${n} days`,
-    every_n_weeks: (n) => `Every ${n} weeks`,
-    every_month: (d) => `Monthly, on the ${d}`,
-    every_n_months: (n, d) => `Every ${n} months, on the ${d}`,
-    on_day: (d) => `On ${d}`,
-    until_day: (d) => `until ${d}`,
-    except_holidays: "except holidays",
-    only_holidays: "holidays only",
-    except_calendar: (name) => `except ${name}`,
-    only_calendar: (name) => `only ${name}`,
-    school_only: "school term only",
-    vacation_only: "school holidays only",
-    n_exceptions: (n) => (n === 1 ? "1 exception" : `${n} exceptions`),
-  },
-};
+const V = new URL(import.meta.url).search;
+const { TEXTS } = await import(`./agenda-texts.js${V}`);
 
 export function texts(hass) {
   const lang = (hass?.locale?.language || hass?.language || "en").slice(0, 2);
@@ -392,7 +86,7 @@ export function fmtRange(start, end, lang) {
 export function fmtNum(value, T, digits = 1) {
   const n = Number(value);
   const s = Number.isInteger(n) ? String(n) : n.toFixed(digits).replace(/\.?0+$/, "");
-  return T._lang.startsWith("fr") ? s.replace(".", ",") : s;
+  return /^(fr|de|nl)/.test(T._lang) ? s.replace(".", ",") : s;
 }
 
 const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -516,8 +210,8 @@ export function repeatSummary(event, T, hass) {
       break;
     }
     case "monthly": {
-      const d = new Date(start * 60000).getUTCDate();
-      text = n === 1 ? T.every_month(d) : T.every_n_months(n, d);
+      const what = monthlyLabel(start, r.monthly, T);
+      text = n === 1 ? T.every_month_on(what) : T.every_n_months_on(n, what);
       break;
     }
     default:
@@ -527,15 +221,37 @@ export function repeatSummary(event, T, hass) {
   if (r.until) extra.push(T.until_day(fmtDay(wm(r.until), lang, { day: "numeric", month: "short", year: "numeric" })));
   if (r.holidays === "exclude") extra.push(T.except_holidays);
   if (r.holidays === "only") extra.push(T.only_holidays);
-  if (r.calendar) {
-    const name = friendlyName(hass, r.calendar);
-    extra.push(r.calendar_mode === "only" ? T.only_calendar(name) : T.except_calendar(name));
+  if (r.calendars?.length) {
+    const names = r.calendars.map((id) => friendlyName(hass, id));
+    const last = names.pop();
+    const word = r.calendar_match === "all" ? T.list_and : T.list_or;
+    const list = names.length ? `${names.join(", ")} ${word} ${last}` : last;
+    extra.push(r.calendar_mode === "only" ? T.only_calendar(list) : T.except_calendar(list));
   }
   if (r.period === "school") extra.push(T.school_only);
   if (r.period === "vacation") extra.push(T.vacation_only);
+  if (r.weeks === "even") extra.push(T.even_weeks);
+  if (r.weeks === "odd") extra.push(T.odd_weeks);
   const nx = (r.exclude || []).length + (r.include || []).length;
   if (nx) extra.push(T.n_exceptions(nx));
+  if (event.conditions?.length) extra.push(T.n_conditions(event.conditions.length));
   return [text, ...extra].join(" · ");
+}
+
+/** "le 12", "le 2e lundi", "le dernier vendredi", for a monthly repetition starting on `start`. */
+export function monthlyLabel(start, mode, T) {
+  const d = new Date(start * 60000).getUTCDate();
+  const wd = T.weekdays_long[weekday(start)];
+  if (mode === "weekday") return T.monthly_modes.weekday(T.ranks[Math.floor((d - 1) / 7)], wd);
+  if (mode === "last_weekday") return T.monthly_modes.last_weekday(wd);
+  return T.monthly_modes.day(d);
+}
+
+/** "coucher du soleil - 15 min" */
+export function sunLabel(anchor, T) {
+  const off = Number(anchor.offset) || 0;
+  const name = T.sun_short[anchor.event] || anchor.event;
+  return off ? `${name} ${off > 0 ? "+" : "-"} ${Math.abs(off)} min` : name;
 }
 
 export function timeSummary(event, T) {
@@ -543,7 +259,9 @@ export function timeSummary(event, T) {
   const s = wm(event.start);
   const e = wm(event.end);
   const nd = dayOf(e) > dayOf(s) && e - dayOf(e) > 0 ? ` (${T.next_day})` : "";
-  return `${wallTime(s)} → ${wallTime(e) === "00:00" ? "24:00" : wallTime(e)}${nd}`;
+  const from = event.start_sun ? sunLabel(event.start_sun, T) : wallTime(s);
+  const to = event.end_sun ? sunLabel(event.end_sun, T) : wallTime(e) === "00:00" ? "24:00" : wallTime(e);
+  return `${from} → ${to}${nd}`;
 }
 
 /** ha-selector is lazy-loaded by the frontend; opening a card editor pulls it in. */

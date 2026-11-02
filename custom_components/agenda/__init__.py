@@ -5,18 +5,21 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import voluptuous as vol
+
 from homeassistant.components import panel_custom
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
-from homeassistant.core import CoreState, Event, HomeAssistant, callback
+from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
+from homeassistant.util import dt as dt_util
 
 from . import websocket
 from .const import (
@@ -50,13 +53,27 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.data.setdefault(DOMAIN, {"agendas": {}, "shared": shared})
 
     async def _core_config_updated(_event: Event) -> None:
-        # holidays follow the core country unless one was picked in the panel
-        if shared.country is None:
-            await shared.async_rebuild()
-            for agenda in list(hass.data[DOMAIN]["agendas"].values()):
-                await agenda.async_context_changed()
+        # holidays follow the core country unless one was picked in the panel;
+        # sun times follow the home location
+        await shared.async_rebuild()
+        for agenda in list(hass.data[DOMAIN]["agendas"].values()):
+            await agenda.async_context_changed()
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _core_config_updated)
+
+    async def _set_absence(call: ServiceCall) -> None:
+        until = call.data.get("until")
+        if until is not None:
+            until = (dt_util.as_local(until) if until.tzinfo else until).strftime("%Y-%m-%dT%H:%M")
+        await shared.async_set_absence(True, until)
+
+    async def _end_absence(_call: ServiceCall) -> None:
+        await shared.async_set_absence(False)
+
+    hass.services.async_register(
+        DOMAIN, "set_absence", _set_absence, schema=vol.Schema({vol.Optional("until"): cv.datetime})
+    )
+    hass.services.async_register(DOMAIN, "end_absence", _end_absence, schema=vol.Schema({}))
 
     integration = await async_get_integration(hass, DOMAIN)
     version = await hass.async_add_executor_job(_frontend_version, str(integration.version))

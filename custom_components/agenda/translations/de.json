@@ -1,0 +1,92 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Neue Agenda",
+        "description": "Eine Agenda pro Raum oder Gerät. Termine, Wiederholungen und die gesteuerten Geräte werden im Agenda-Panel eingestellt.",
+        "data": {
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "empty": "Der Name darf nicht leer sein."
+    },
+    "abort": {
+      "already_configured": "Es gibt bereits eine Agenda mit diesem Namen."
+    }
+  },
+  "entity": {
+    "switch": {
+      "enabled": {
+        "name": "Aktiv"
+      }
+    },
+    "sensor": {
+      "current": {
+        "name": "Jetzt"
+      },
+      "next_change": {
+        "name": "Nächste Änderung"
+      }
+    }
+  },
+  "services": {
+    "resync": {
+      "name": "Neu abgleichen",
+      "description": "Setzt die von der Agenda gesteuerten Geräte auf den Zustand, den sie jetzt vorsieht."
+    },
+    "skip_next": {
+      "name": "Nächsten Termin überspringen",
+      "description": "Entfernt den nächsten anstehenden Termin, eines Termins oder irgendeines Termins der Agenda.",
+      "fields": {
+        "event": {
+          "name": "Termin",
+          "description": "Name des Termins. Leer: der nächste Termin, egal welcher."
+        }
+      }
+    },
+    "add_dates": {
+      "name": "Daten hinzufügen",
+      "description": "Fügt an diesen Tagen Termine hinzu, zusätzlich zur Wiederholung.",
+      "fields": {
+        "event": {
+          "name": "Termin",
+          "description": "Name des Termins (alle Termine mit diesem Namen)."
+        },
+        "dates": {
+          "name": "Daten",
+          "description": "Hinzuzufügende Tage, zum Beispiel 2026-12-24."
+        }
+      }
+    },
+    "remove_dates": {
+      "name": "Daten entfernen",
+      "description": "Entfernt die Termine an diesen Tagen.",
+      "fields": {
+        "event": {
+          "name": "Termin",
+          "description": "Name des Termins (alle Termine mit diesem Namen)."
+        },
+        "dates": {
+          "name": "Daten",
+          "description": "Zu entfernende Tage, zum Beispiel 2026-12-24."
+        }
+      }
+    },
+    "set_absence": {
+      "name": "Abwesenheitsmodus starten",
+      "description": "Agenden, die dem Abwesenheitsmodus folgen, behalten ihren Abwesenheitszustand und führen bis zum Ende keine Aktion aus.",
+      "fields": {
+        "until": {
+          "name": "Bis",
+          "description": "Ende der Abwesenheit. Leer: von Hand beenden."
+        }
+      }
+    },
+    "end_absence": {
+      "name": "Abwesenheitsmodus beenden",
+      "description": "Die Agenden folgen wieder ihrem Programm."
+    }
+  }
+}

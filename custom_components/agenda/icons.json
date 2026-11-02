@@ -2,6 +2,21 @@
   "services": {
     "resync": {
       "service": "mdi:calendar-sync"
+    },
+    "skip_next": {
+      "service": "mdi:debug-step-over"
+    },
+    "add_dates": {
+      "service": "mdi:calendar-plus"
+    },
+    "remove_dates": {
+      "service": "mdi:calendar-remove"
+    },
+    "set_absence": {
+      "service": "mdi:home-export-outline"
+    },
+    "end_absence": {
+      "service": "mdi:home-import-outline"
     }
   }
 }

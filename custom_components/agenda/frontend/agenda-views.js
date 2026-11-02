@@ -70,6 +70,7 @@ export function renderWeek(ctx) {
       if (holiday) note = `<span class="wk-hol">${esc(holiday)}</span>`;
       else if (vacationStarts) note = `<span class="wk-vac">${esc(school || T.vacation)}</span>`;
       return `<div class="wk-day ${isToday ? "today" : ""} ${holiday ? "holiday" : ""} ${onVacation ? "vacation" : ""}" ${tip ? `title="${esc(tip)}"` : ""}>
+        ${editable && days === 7 ? `<button class="wk-copy" data-copy-day="${d}" title="${esc(T.copy_day)}"><ha-icon icon="mdi:content-copy"></ha-icon></button>` : ""}
         <span class="wk-dname">${esc(fmtDay(d, lang, { weekday: "short" }))}</span>
         <span class="wk-dnum">${esc(fmtDay(d, lang, { day: "numeric" }))}</span>
         ${note}
@@ -152,6 +153,70 @@ export function renderWeek(ctx) {
       <div class="wk-cols">${cols}</div>
     </div>
   </div>`;
+}
+
+/**
+ * ctx: { hass, T, agendas, occ, holidays, vacation, firstDay, weeks, month, now }
+ * `month` is the 0-11 month shown; days of the other months are dimmed.
+ */
+export function renderMonth(ctx) {
+  const { hass, T, agendas, firstDay, weeks, month, now } = ctx;
+  const lang = T._lang;
+  const today = dayOf(now);
+  const days = weeks * 7;
+  const holidays = ctx.holidays || {};
+  const vacation = ctx.vacation || {};
+  const single = agendas.length === 1;
+
+  // each occurrence is listed on the day it starts, or on the first day shown
+  const perDay = {};
+  for (const agenda of agendas) {
+    const byId = Object.fromEntries(agenda.events.map((e) => [e.id, e]));
+    const split = splitByDay(ctx.occ[agenda.entry_id] || [], firstDay, days);
+    for (const [d, pieces] of Object.entries(split)) {
+      for (const piece of pieces) {
+        const event = byId[piece.occ.event_id];
+        if (event && (piece.first || Number(d) === firstDay))
+          (perDay[d] ||= []).push({ agenda, event, occ: piece.occ });
+      }
+    }
+  }
+
+  const head = Array.from(
+    { length: 7 },
+    (_, i) => `<div class="mo-wd">${esc(fmtDay(firstDay + i * DAY, lang, { weekday: "short" }))}</div>`,
+  ).join("");
+  const cells = Array.from({ length: days }, (_, i) => {
+    const d = firstDay + i * DAY;
+    const iso = wallDate(d);
+    const items = (perDay[d] || []).sort((a, b) => wm(a.occ.start) - wm(b.occ.start));
+    const shown = items.length > 4 ? items.slice(0, 3) : items;
+    const chips = shown
+      .map(({ agenda, event, occ }) => {
+        const color = eventColor(hass, agenda, event);
+        const label =
+          hasStates(agenda) && event.state
+            ? stateLabel(hass, agenda, event.state, T)
+            : eventLabel(hass, agenda, event, T);
+        const time = occ.all_day ? "" : wallTime(wm(occ.start));
+        const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), time].filter(Boolean).join(" · ");
+        return `<div class="mo-ev" ${occData(agenda, occ)} style="--c:${color};--t:${textColor(color)}" title="${esc(tip)}">
+          ${time ? `<b>${time}</b>` : ""}<span>${esc(label)}</span></div>`;
+      })
+      .join("");
+    const more =
+      items.length > shown.length
+        ? `<div class="mo-more">${esc(T.more_events(items.length - shown.length))}</div>`
+        : "";
+    const outside = new Date(d * 60000).getUTCMonth() !== month;
+    const note = holidays[iso] ? `<span class="mo-hol">${esc(holidays[iso])}</span>` : "";
+    return `<div class="mo-day ${outside ? "out" : ""} ${d === today ? "today" : ""} ${holidays[iso] ? "holiday" : ""} ${vacation[iso] !== undefined ? "vacation" : ""}"
+        title="${esc([holidays[iso], vacation[iso] !== undefined ? vacation[iso] || T.vacation : ""].filter(Boolean).join(" · "))}">
+      <div class="mo-top"><button class="mo-num" data-mo-day="${d}">${esc(fmtDay(d, lang, { day: "numeric" }))}</button>${note}</div>
+      ${chips}${more}
+    </div>`;
+  }).join("");
+  return `<div class="mo" style="--weeks:${weeks}"><div class="mo-head">${head}</div><div class="mo-grid">${cells}</div></div>`;
 }
 
 /** ctx: { hass, T, agendas, occ, day, now } */
@@ -270,7 +335,13 @@ export const VIEW_STYLES = `
   .wk-dnum { font-size: 20px; font-weight: 500; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: var(--primary-text-color); }
   .wk-day.today .wk-dname { color: var(--primary-color); font-weight: 600; }
   .wk-day.today .wk-dnum { background: var(--primary-color); color: var(--text-primary-color, #fff); }
-  .wk-day { min-width: 0; }
+  .wk-day { min-width: 0; position: relative; }
+  .wk-copy { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; display: grid; place-items: center; border: none; border-radius: 50%;
+    background: none; color: var(--secondary-text-color); cursor: pointer; opacity: 0; transition: opacity .15s; }
+  .wk-copy ha-icon { --mdc-icon-size: 15px; }
+  .wk-day:hover .wk-copy, .wk-copy:focus-visible { opacity: .8; }
+  .wk-copy:hover { background: var(--agenda-hover); opacity: 1; }
+  @media (hover: none) { .wk-copy { opacity: .55; } }
   .wk-hol { font-size: 10px; line-height: 1.2; color: var(--agenda-holiday); max-width: calc(100% - 6px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .wk-day.holiday .wk-dname { color: var(--agenda-holiday); }
   .wk-day.vacation { box-shadow: inset 0 -3px 0 var(--agenda-vacation); }
@@ -284,7 +355,7 @@ export const VIEW_STYLES = `
     cursor: copy; }
   .wk-col.today { background-color: var(--agenda-today); }
   .ev { position: absolute; right: 2px; box-sizing: border-box; border-radius: 6px; padding: 3px 6px; overflow: hidden;
-    background: var(--c); color: var(--t); cursor: pointer; user-select: none; touch-action: auto;
+    background: var(--c); color: var(--t); cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: auto;
     box-shadow: 0 1px 2px rgba(0,0,0,.18), inset 3px 0 0 rgba(0,0,0,.12); transition: box-shadow .15s, filter .15s; }
   .ev:hover { box-shadow: 0 3px 10px rgba(0,0,0,.28), inset 3px 0 0 rgba(0,0,0,.12); filter: saturate(1.08); }
   .ev.cont { border-top-left-radius: 0; border-top-right-radius: 0; }
@@ -294,6 +365,7 @@ export const VIEW_STYLES = `
   .ev-sub { font-size: 11px; line-height: 1.25; opacity: .85; white-space: normal; overflow: hidden; }
   .ev.short { display: flex; align-items: center; padding-top: 0; padding-bottom: 0; }
   .ev.short .ev-main { font-size: 12px; }
+  .ev.armed { outline: 2px solid var(--primary-color); outline-offset: 1px; }
   .ev.dragging { opacity: .85; box-shadow: 0 8px 22px rgba(0,0,0,.35); z-index: 50 !important; cursor: grabbing; transition: none; }
   .ev-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; }
   .ev-resize::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 18px; margin-left: -9px; height: 3px; border-radius: 2px; background: currentColor; opacity: 0; transition: opacity .15s; }
@@ -308,6 +380,32 @@ export const VIEW_STYLES = `
   .now.v::before { left: -4px; top: -5px; }
   .drag-tip { position: fixed; z-index: 1000; pointer-events: none; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;
     background: var(--primary-text-color); color: var(--card-background-color); box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+
+  /* ---- month ---- */
+  .mo { display: flex; flex-direction: column; height: 100%; min-height: calc(var(--weeks) * 92px + 32px); min-width: 560px; }
+  .mo-head { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--divider-color); }
+  .mo-wd { padding: 8px 0; text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--secondary-text-color); }
+  .mo-grid { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(var(--weeks), minmax(92px, 1fr)); }
+  .mo-day { min-width: 0; padding: 4px 4px 6px; border-right: 1px solid var(--agenda-line); border-bottom: 1px solid var(--agenda-line);
+    display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+  .mo-day:nth-child(7n) { border-right: none; }
+  .mo-day.out { background: var(--agenda-track); }
+  .mo-day.out .mo-num { opacity: .45; }
+  .mo-day.today { background: var(--agenda-today); }
+  .mo-day.vacation { box-shadow: inset 0 -3px 0 var(--agenda-vacation); }
+  .mo-top { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .mo-num { font: inherit; font-size: 13px; font-weight: 600; border: none; background: none; color: var(--primary-text-color); cursor: pointer;
+    min-width: 24px; height: 24px; border-radius: 12px; padding: 0 6px; flex: none; }
+  .mo-num:hover { background: var(--agenda-hover); }
+  .mo-day.today .mo-num { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+  .mo-day.holiday .mo-num { color: var(--agenda-holiday); }
+  .mo-day.today.holiday .mo-num { color: var(--text-primary-color, #fff); }
+  .mo-hol { font-size: 10px; color: var(--agenda-holiday); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mo-ev { display: flex; gap: 5px; align-items: baseline; padding: 1px 6px; border-radius: 5px; font-size: 12px; line-height: 1.5;
+    background: var(--c); color: var(--t); cursor: pointer; white-space: nowrap; overflow: hidden; }
+  .mo-ev b { font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
+  .mo-ev span { overflow: hidden; text-overflow: ellipsis; }
+  .mo-more { font-size: 11.5px; color: var(--secondary-text-color); padding: 0 6px; }
 
   /* ---- house ---- */
   .hs { --name-w: 190px; display: flex; flex-direction: column; gap: 10px; padding: 8px 4px 4px; }

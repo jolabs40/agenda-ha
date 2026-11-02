@@ -10,7 +10,7 @@ DOMAIN = "agenda"
 
 # .storage/agenda.<entry_id>: one file per agenda
 STORAGE_VERSION = 1
-STORAGE_MINOR_VERSION = 2  # 1.2 renamed climates/setpoint to entities/state
+STORAGE_MINOR_VERSION = 3  # 1.2 renamed climates/setpoint to entities/state, 1.3 allows several calendars
 # .storage/agenda: settings shared by all agendas
 SHARED_STORAGE_VERSION = 1
 
@@ -50,4 +50,11 @@ DEFAULT_SETTINGS = {
     "entities": [],
     "default_state": None,
     "resync_on_start": True,
+    # absence mode: whether this agenda pauses, and the state it keeps meanwhile
+    # (None: the default state)
+    "follow_absence": True,
+    "away_state": None,
 }
+
+# a condition entity changing state settles before the agenda reacts
+CONDITION_DELAY_S = 2
