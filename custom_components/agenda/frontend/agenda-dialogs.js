@@ -252,6 +252,22 @@ export function eventEditor(host, opts) {
     weeks: "all",
     ...(ev.repeat || {}),
   };
+  // two lists here; stored as calendars, plus except_calendars when both are used
+  const r0 = ev.repeat;
+  const cal =
+    r0.calendar_mode === "only"
+      ? {
+          only: [...r0.calendars],
+          only_match: r0.calendar_match,
+          except: [...(r0.except_calendars || [])],
+          except_match: r0.except_match || "any",
+        }
+      : {
+          only: [],
+          only_match: "any",
+          except: [...new Set([...r0.calendars, ...(r0.except_calendars || [])])],
+          except_match: r0.calendar_match,
+        };
   ev.start_actions = ev.start_actions || [];
   ev.end_actions = ev.end_actions || [];
   ev.start_sun = ev.start_sun || null;
@@ -533,10 +549,20 @@ export function eventEditor(host, opts) {
               `<span class="pill">${esc(fmtDay(wm(d), T._lang, { weekday: "short", day: "numeric", month: "short", year: "numeric" }))}<button data-rm="${key}:${d}">×</button></span>`,
           )
           .join("");
-      const chosen = r.calendars || [];
-      const free = calendars().filter((c) => !chosen.includes(c.entity_id));
-      const choice = (key, modes) =>
-        `<select class="inp" data-cal-${key}>${modes.map((m) => `<option value="${m}" ${r[`calendar_${key}`] === m ? "selected" : ""}>${esc(T[`calendar_${m}`])}</option>`).join("")}</select>`;
+      const taken = [...cal.only, ...cal.except];
+      const free = calendars().filter((c) => !taken.includes(c.entity_id));
+      const side = (key) => `<div class="calside">
+          <span class="sub">${esc(key === "only" ? T.calendar_only : T.calendar_exclude)}</span>
+          <div class="pills">${cal[key]
+            .map(
+              (id) =>
+                `<span class="pill">${esc(friendlyName(hass, id))}<button data-rm-cal="${key}:${esc(id)}">×</button></span>`,
+            )
+            .join("")}
+            ${free.length ? `<select class="inp" data-cal="${key}"><option value="">${esc(T.add_calendar)}</option>${free.map((c) => `<option value="${esc(c.entity_id)}">${esc(friendlyName(hass, c.entity_id))}</option>`).join("")}</select>` : ""}
+          </div>
+          ${cal[key].length > 1 ? `<select class="inp" data-cal-match="${key}">${["any", "all"].map((m) => `<option value="${m}" ${cal[`${key}_match`] === m ? "selected" : ""}>${esc(T[`calendar_${m}`])}</option>`).join("")}</select>` : ""}
+        </div>`;
       sec.innerHTML =
         ["exclude", "include"]
           .map(
@@ -545,17 +571,9 @@ export function eventEditor(host, opts) {
           )
           .join("") +
         `<div class="fld"><span>${esc(T.calendar_condition)}</span><p class="hint">${esc(T.calendar_hint)}</p>
-          <div class="pills">${chosen
-            .map(
-              (id) =>
-                `<span class="pill">${esc(friendlyName(hass, id))}<button data-rm-cal="${esc(id)}">×</button></span>`,
-            )
-            .join("")}
-            ${free.length ? `<select class="inp" data-cal><option value="">${esc(T.add_calendar)}</option>${free.map((c) => `<option value="${esc(c.entity_id)}">${esc(friendlyName(hass, c.entity_id))}</option>`).join("")}</select>` : ""}
-          </div>
-          ${chosen.length ? `<div class="row">${choice("mode", ["exclude", "only"])}${chosen.length > 1 ? choice("match", ["any", "all"]) : ""}</div>` : ""}
+          ${side("only")}${side("except")}
           </div>`;
-      const n = (r.exclude || []).length + (r.include || []).length + chosen.length;
+      const n = (r.exclude || []).length + (r.include || []).length + taken.length;
       dlg.$("[data-count]").textContent = n ? ` · ${n}` : "";
       sec.querySelectorAll("[data-rm]").forEach((b) =>
         b.addEventListener("click", () => {
@@ -572,18 +590,23 @@ export function eventEditor(host, opts) {
           sections.exceptions();
         }),
       );
-      sec.querySelector("[data-cal]")?.addEventListener("change", (x) => {
-        if (x.target.value) r.calendars = [...chosen, x.target.value];
-        sections.exceptions();
-      });
-      sec.querySelectorAll("[data-rm-cal]").forEach((b) =>
-        b.addEventListener("click", () => {
-          r.calendars = chosen.filter((id) => id !== b.dataset.rmCal);
+      sec.querySelectorAll("[data-cal]").forEach((s) =>
+        s.addEventListener("change", () => {
+          if (s.value) cal[s.dataset.cal] = [...cal[s.dataset.cal], s.value];
           sections.exceptions();
         }),
       );
-      sec.querySelector("[data-cal-mode]")?.addEventListener("change", (x) => (r.calendar_mode = x.target.value));
-      sec.querySelector("[data-cal-match]")?.addEventListener("change", (x) => (r.calendar_match = x.target.value));
+      sec.querySelectorAll("[data-rm-cal]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const at = b.dataset.rmCal.indexOf(":");
+          const key = b.dataset.rmCal.slice(0, at);
+          cal[key] = cal[key].filter((id) => id !== b.dataset.rmCal.slice(at + 1));
+          sections.exceptions();
+        }),
+      );
+      sec
+        .querySelectorAll("[data-cal-match]")
+        .forEach((s) => s.addEventListener("change", () => (cal[`${s.dataset.calMatch}_match`] = s.value)));
     },
     conditions() {
       const sec = dlg.$('[data-sec="conditions"]');
@@ -714,7 +737,16 @@ export function eventEditor(host, opts) {
     if (out.repeat.freq !== "weekly") out.repeat.weekdays = [];
     if (out.repeat.freq !== "monthly") out.repeat.monthly = "day";
     if (!["daily", "weekly"].includes(out.repeat.freq)) out.repeat.weeks = "all";
-    if (out.repeat.calendars.length < 2) out.repeat.calendar_match = "any";
+    // the second list is written only when both are used, so older versions can still read the event
+    const match = (key) => (cal[key].length > 1 ? cal[`${key}_match`] : "any");
+    delete out.repeat.except_calendars;
+    delete out.repeat.except_match;
+    if (cal.only.length) {
+      Object.assign(out.repeat, { calendars: cal.only, calendar_mode: "only", calendar_match: match("only") });
+      if (cal.except.length) Object.assign(out.repeat, { except_calendars: cal.except, except_match: match("except") });
+    } else {
+      Object.assign(out.repeat, { calendars: cal.except, calendar_mode: "exclude", calendar_match: match("except") });
+    }
     out.name = (out.name || "").trim();
     out.icon = (out.icon || "").trim() || null;
     return out;
@@ -1153,6 +1185,8 @@ export const DIALOG_STYLES = `
   details.more summary span { color: var(--secondary-text-color); font-weight: 400; }
   details.more > div, details.more > p { margin-bottom: 8px; }
   .pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .calside { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; margin-top: 4px; }
+  .calside .sub { font-size: 13px; }
   .pill { display: inline-flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; border-radius: 99px; background: var(--agenda-hover); font-size: 13px; }
   .pill button { border: none; background: none; color: inherit; cursor: pointer; font-size: 15px; padding: 0 6px; }
   .add { display: inline-flex; gap: 4px; align-items: center; }

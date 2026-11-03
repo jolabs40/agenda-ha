@@ -221,13 +221,17 @@ export function repeatSummary(event, T, hass) {
   if (r.until) extra.push(T.until_day(fmtDay(wm(r.until), lang, { day: "numeric", month: "short", year: "numeric" })));
   if (r.holidays === "exclude") extra.push(T.except_holidays);
   if (r.holidays === "only") extra.push(T.only_holidays);
-  if (r.calendars?.length) {
-    const names = r.calendars.map((id) => friendlyName(hass, id));
+  const calendarList = (ids, match) => {
+    const names = ids.map((id) => friendlyName(hass, id));
     const last = names.pop();
-    const word = r.calendar_match === "all" ? T.list_and : T.list_or;
-    const list = names.length ? `${names.join(", ")} ${word} ${last}` : last;
+    const word = match === "all" ? T.list_and : T.list_or;
+    return names.length ? `${names.join(", ")} ${word} ${last}` : last;
+  };
+  if (r.calendars?.length) {
+    const list = calendarList(r.calendars, r.calendar_match);
     extra.push(r.calendar_mode === "only" ? T.only_calendar(list) : T.except_calendar(list));
   }
+  if (r.except_calendars?.length) extra.push(T.except_calendar(calendarList(r.except_calendars, r.except_match)));
   if (r.period === "school") extra.push(T.school_only);
   if (r.period === "vacation") extra.push(T.vacation_only);
   if (r.weeks === "even") extra.push(T.even_weeks);

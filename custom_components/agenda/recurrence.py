@@ -23,6 +23,8 @@ Event shape (missing fields take their default value):
         "calendars": ["calendar.trips"],  # condition calendars, none by default
         "calendar_mode": "exclude" | "only",
         "calendar_match": "any" | "all",  # busy in one of them, or in all of them
+        "except_calendars": ["calendar.leave"],  # with calendar_mode "only": but not these days
+        "except_match": "any" | "all",
         "period": "always" | "school" | "vacation",  # against the shared school calendar
         "monthly": "day" | "weekday" | "last_weekday",  # 12th / 2nd Monday / last Monday
         "weeks": "all" | "even" | "odd"   # ISO week numbers
@@ -163,6 +165,13 @@ def validate_event(event: dict[str, Any]) -> None:
             raise ValueError("unknown calendar condition")
         if repeat.get("calendar_match", CALENDAR_ANY) not in CALENDAR_MATCHES:
             raise ValueError("unknown calendar match")
+    if repeat.get("except_calendars"):
+        if not repeat.get("calendars") or repeat.get("calendar_mode", CALENDAR_EXCLUDE) != CALENDAR_ONLY:
+            raise ValueError("except_calendars needs calendars in the only mode")
+        if set(repeat["except_calendars"]) & set(repeat["calendars"]):
+            raise ValueError("a calendar cannot be in both lists")
+        if repeat.get("except_match", CALENDAR_ANY) not in CALENDAR_MATCHES:
+            raise ValueError("unknown calendar match")
     if repeat.get("period", PERIOD_ALWAYS) not in PERIODS:
         raise ValueError("unknown period")
     if repeat.get("monthly", MONTHLY_DAY) not in MONTHLY_MODES:
@@ -228,6 +237,12 @@ def wall_bounds(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> 
     return start, end
 
 
+def _busy(day: date, ctx: Context, calendars: Iterable[str], match: str) -> bool:
+    """Whether the day has an event in one of the calendars, or in each of them."""
+    busy = [day in ctx.calendar_days.get(calendar, ()) for calendar in calendars]
+    return all(busy) if match == CALENDAR_ALL else any(busy)
+
+
 def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bool:
     """Whether an occurrence of the event starts on this day."""
     repeat = event.get("repeat") or {}
@@ -276,10 +291,12 @@ def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bo
 
     calendars = repeat.get("calendars")
     if calendars:
-        busy = [day in ctx.calendar_days.get(calendar, ()) for calendar in calendars]
-        hit = all(busy) if repeat.get("calendar_match", CALENDAR_ANY) == CALENDAR_ALL else any(busy)
+        hit = _busy(day, ctx, calendars, repeat.get("calendar_match", CALENDAR_ANY))
         if hit != (repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY):
             return False
+    excluded = repeat.get("except_calendars")
+    if excluded and _busy(day, ctx, excluded, repeat.get("except_match", CALENDAR_ANY)):
+        return False
 
     period = repeat.get("period", PERIOD_ALWAYS)
     if period != PERIOD_ALWAYS:

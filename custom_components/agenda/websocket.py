@@ -54,6 +54,16 @@ STATE_SCHEMA = vol.Any(
     vol.Schema({vol.Required("type"): "value", vol.Required("value"): vol.Coerce(float)}),
 )
 
+
+def _drop_empty_except(repeat: dict[str, Any]) -> dict[str, Any]:
+    """Leave the second calendar list out when unused: older versions refuse unknown keys,
+    so events stay editable after a downgrade."""
+    if not repeat.get("except_calendars"):
+        repeat.pop("except_calendars", None)
+        repeat.pop("except_match", None)
+    return repeat
+
+
 REPEAT_SCHEMA = vol.All(
     # a page loaded before the update still sends a single calendar
     upgrade_repeat,
@@ -69,11 +79,14 @@ REPEAT_SCHEMA = vol.All(
             vol.Optional("calendars", default=[]): vol.All([cv.entity_domain("calendar")], vol.Unique()),
             vol.Optional("calendar_mode", default=recurrence.CALENDAR_EXCLUDE): vol.In(recurrence.CALENDAR_MODES),
             vol.Optional("calendar_match", default=recurrence.CALENDAR_ANY): vol.In(recurrence.CALENDAR_MATCHES),
+            vol.Optional("except_calendars"): vol.All([cv.entity_domain("calendar")], vol.Unique()),
+            vol.Optional("except_match"): vol.In(recurrence.CALENDAR_MATCHES),
             vol.Optional("period", default=recurrence.PERIOD_ALWAYS): vol.In(recurrence.PERIODS),
             vol.Optional("monthly", default=recurrence.MONTHLY_DAY): vol.In(recurrence.MONTHLY_MODES),
             vol.Optional("weeks", default=recurrence.WEEKS_ALL): vol.In(recurrence.WEEKS_MODES),
         }
     ),
+    _drop_empty_except,
 )
 
 SUN_SCHEMA = vol.Any(

@@ -330,7 +330,10 @@ class Agenda:
 
     def condition_calendars(self) -> set[str]:
         calendars = {
-            calendar for event in self.events for calendar in (event.get("repeat") or {}).get("calendars") or ()
+            calendar
+            for event in self.events
+            for key in ("calendars", "except_calendars")
+            for calendar in (event.get("repeat") or {}).get(key) or ()
         }
         school = self.shared.school_calendar
         if school and any(
