@@ -41,8 +41,8 @@ auf Deutsch eingestellt ist.
   oder ein Fenster geschlossen ist.
 - Die Feiertage des eigenen Landes können übersprungen werden oder die einzigen Tage sein.
 - Kalender können als Bedingung dienen: Tage mit einem Termin darin überspringen (Reisen,
-  Abwesenheiten) oder nur diese Tage behalten. Bei mehreren Kalendern genügt ein Termin in einem
-  davon, oder es braucht einen in jedem.
+  Abwesenheiten), nur diese Tage behalten oder beides beim selben Termin. Bei mehreren Kalendern
+  genügt ein Termin in einem davon, oder es braucht einen in jedem.
 - Ein Kalender der Schulferien wird einmal für alle Agenden gewählt. Jeder wiederholte Termin gilt
   dann immer, nur in der Schulzeit oder nur in den Schulferien, und die Wochenansicht markiert die
   Ferien.
@@ -83,8 +83,9 @@ Mit HACS den Knopf oben verwenden, oder in HACS das Menü öffnen, Benutzerdefin
 wählen und `https://github.com/jolabs40/agenda-ha` mit dem Typ Integration hinzufügen. Agenda
 herunterladen und Home Assistant neu starten.
 
-Ohne HACS `custom_components/agenda` in den Ordner `custom_components` der Konfiguration kopieren
-und Home Assistant neu starten.
+Ohne HACS `agenda.zip` aus der [neuesten Version](https://github.com/jolabs40/agenda-ha/releases/latest)
+in einen Ordner `custom_components/agenda` der Konfiguration entpacken (oder diesen Ordner aus dem
+Repository kopieren) und Home Assistant neu starten.
 
 Danach die Integration Agenda unter Einstellungen > Geräte & Dienste hinzufügen. Jeder Eintrag ist
 eine Agenda; weitere lassen sich im Panel mit dem Knopf + anlegen. Alles andere wird im Agenda-Panel

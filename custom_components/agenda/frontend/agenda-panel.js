@@ -103,8 +103,6 @@ class AgendaPanel extends HTMLElement {
         <div class="title">${esc(this.T.title)}</div>
         <div class="tabs" data-tabs></div>
         <button class="ic" data-absence title="${esc(this.T.absence_title)}" aria-label="${esc(this.T.absence_title)}"><ha-icon icon="mdi:home-export-outline"></ha-icon></button>
-        <a class="ic kofi" href="https://ko-fi.com/jolabs40" target="_blank" rel="noopener noreferrer" title="${esc(this.T.support)}"
-          aria-label="${esc(this.T.support)}"><ha-icon icon="mdi:coffee-outline"></ha-icon></a>
       </div>
       <div class="bar" data-bar></div>
       <div class="away" data-away hidden></div>
@@ -905,14 +903,12 @@ const STYLES = `
   .btn:hover { filter: brightness(1.05); }
   .ic { border: none; background: none; color: inherit; cursor: pointer; border-radius: 50%; width: 36px; height: 36px; display: inline-grid; place-items: center; }
   .ic:hover { background: var(--agenda-hover); }
-  .kofi { text-decoration: none; opacity: .65; }
   [data-absence].on { color: var(--warning-color, #f57c00); }
   .away { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 16px 8px; padding: 8px 14px; border-radius: 12px;
     background: color-mix(in srgb, var(--warning-color, #f57c00) 14%, var(--card-background-color));
     border: 1px solid color-mix(in srgb, var(--warning-color, #f57c00) 45%, transparent); font-size: 14px; font-weight: 500; }
   .away ha-icon { color: var(--warning-color, #f57c00); }
   .away span { margin-right: auto; }
-  .kofi:hover { opacity: 1; }
   .tgl { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
   .tgl input { display: none; }
   .tgl span { width: 36px; height: 20px; border-radius: 99px; background: var(--divider-color); position: relative; transition: background .15s; }

@@ -39,8 +39,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   est à la maison ou une fenêtre est fermée.
 - Les jours fériés du pays peuvent être sautés, ou être les seuls jours retenus.
 - Des calendriers peuvent servir de condition : sauter les jours où ils ont un événement
-  (déplacements, absences) ou ne garder que ceux-là. Avec plusieurs calendriers, un événement dans
-  l'un d'eux suffit, ou il en faut un dans chacun.
+  (déplacements, absences), ne garder que ceux-là, ou les deux sur le même événement. Avec plusieurs
+  calendriers, un événement dans l'un d'eux suffit, ou il en faut un dans chacun.
 - Un calendrier des vacances scolaires se choisit une fois pour tous les agendas. Chaque événement
   répété s'applique alors toujours, seulement en période scolaire ou seulement pendant les
   vacances, et la vue Semaine signale les vacances.
@@ -80,8 +80,9 @@ Avec HACS, utiliser le bouton ci-dessus, ou ouvrir HACS, son menu, Dépôts pers
 ajouter `https://github.com/jolabs40/agenda-ha` avec le type Intégration. Télécharger Agenda,
 puis redémarrer Home Assistant.
 
-Sans HACS, copier `custom_components/agenda` dans le dossier `custom_components` de la
-configuration, puis redémarrer Home Assistant.
+Sans HACS, décompresser `agenda.zip`, joint à la [dernière version](https://github.com/jolabs40/agenda-ha/releases/latest),
+dans un dossier `custom_components/agenda` de la configuration (ou copier ce dossier depuis le
+dépôt), puis redémarrer Home Assistant.
 
 Ajouter ensuite l'intégration Agenda depuis Paramètres > Appareils et services. Chaque entrée est
 un agenda ; le bouton + du panneau en crée d'autres. Tout le reste se règle dans le panneau Agenda.

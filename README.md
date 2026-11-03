@@ -34,9 +34,9 @@ agenda goes back to its default state.
 - Conditions on entities: an event takes charge only while, for instance, someone is home or a
   window is closed.
 - Public holidays of your country can be skipped, or used as the only days.
-- Calendars can act as conditions: skip the days with an event in them (trips, absences) or keep
-  only those days. With several calendars, an event in one of them is enough, or one is needed in
-  each of them.
+- Calendars can act as conditions: skip the days with an event in them (trips, absences), keep
+  only those days, or both on the same event. With several calendars, an event in one of them is
+  enough, or one is needed in each of them.
 - A school holiday calendar can be set once for all agendas. Each repeating event then applies
   always, only during school term, or only during school holidays, and the week view marks the
   holidays.
@@ -77,8 +77,9 @@ With HACS, use the button above, or go to HACS, open the menu, choose Custom rep
 `https://github.com/jolabs40/agenda-ha` with the Integration type. Download Agenda and restart
 Home Assistant.
 
-Without HACS, copy `custom_components/agenda` into the `custom_components` folder of your
-configuration and restart Home Assistant.
+Without HACS, unzip `agenda.zip` from the [latest release](https://github.com/jolabs40/agenda-ha/releases/latest)
+into a `custom_components/agenda` folder of your configuration (or copy that folder from this
+repository) and restart Home Assistant.
 
 Then add the Agenda integration from Settings > Devices & services. Each entry is one agenda;
 more can be created from the panel with the + button. Everything else is set up in the Agenda

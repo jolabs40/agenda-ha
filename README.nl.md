@@ -41,8 +41,8 @@ Assistant in het Nederlands staat.
   thuis is of een raam dicht is.
 - De feestdagen van je land kunnen worden overgeslagen, of de enige dagen zijn.
 - Kalenders kunnen als voorwaarde dienen: dagen met een gebeurtenis erin overslaan (reizen,
-  afwezigheden) of alleen die dagen houden. Bij meerdere kalenders volstaat een gebeurtenis in één
-  ervan, of moet er een in elk staan.
+  afwezigheden), alleen die dagen houden, of allebei bij dezelfde gebeurtenis. Bij meerdere
+  kalenders volstaat een gebeurtenis in één ervan, of moet er een in elk staan.
 - Een kalender van de schoolvakanties kies je één keer voor alle agenda's. Elke herhaalde
   gebeurtenis geldt dan altijd, alleen in de schoolperiode of alleen in de schoolvakantie, en het
   weekoverzicht markeert de vakanties.
@@ -84,8 +84,9 @@ Met HACS de knop hierboven gebruiken, of in HACS het menu openen, Aangepaste rep
 `https://github.com/jolabs40/agenda-ha` toevoegen met het type Integratie. Agenda downloaden en
 Home Assistant herstarten.
 
-Zonder HACS `custom_components/agenda` naar de map `custom_components` van je configuratie
-kopiëren en Home Assistant herstarten.
+Zonder HACS `agenda.zip` van de [nieuwste versie](https://github.com/jolabs40/agenda-ha/releases/latest)
+uitpakken in een map `custom_components/agenda` van je configuratie (of die map uit de repository
+kopiëren) en Home Assistant herstarten.
 
 Daarna de integratie Agenda toevoegen via Instellingen > Apparaten & diensten. Elk item is één
 agenda; meer maak je in het paneel met de knop +. Al het andere stel je in het Agenda-paneel in.
