@@ -93,10 +93,11 @@ def plan(entity_id: str, current: str, attributes: Mapping[str, Any], wanted: Ma
                 calls.append(("climate", "set_hvac_mode", {"hvac_mode": on_mode}))
             calls.append(("climate", "set_preset_mode", {"preset_mode": wanted["preset"]}))
         elif kind == "temperature":
-            data: dict[str, Any] = {"temperature": wanted["temperature"]}
+            # not through the hvac_mode field of set_temperature: each integration may ignore it,
+            # and Versatile Thermostat does, leaving the thermostat off
             if current == "off" and on_mode:
-                data["hvac_mode"] = on_mode
-            calls.append(("climate", "set_temperature", data))
+                calls.append(("climate", "set_hvac_mode", {"hvac_mode": on_mode}))
+            calls.append(("climate", "set_temperature", {"temperature": wanted["temperature"]}))
 
     elif domain in KIND_DOMAINS[KIND_ON_OFF]:
         if kind == "off":
