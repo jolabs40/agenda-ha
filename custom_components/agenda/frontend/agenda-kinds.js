@@ -264,12 +264,12 @@ export function liveText(hass, agenda, T) {
 }
 
 const chip = (key, label, color, active) =>
-  `<button class="chip sp ${active ? "on" : ""}" data-sp="${esc(key)}" style="--c:${color};--t:${textColor(color)}">${esc(label)}</button>`;
+  `<button class="chip sp ${active ? "on" : ""}" data-sp="${esc(key)}" aria-pressed="${active}" style="--c:${esc(color)};--t:${esc(textColor(color))}">${active ? `<ha-icon icon="mdi:check"></ha-icon>` : ""}${esc(label)}</button>`;
 
 function bigValue({ value, text, color, min, max, step, minus = "-", plus = "+" }) {
   return `<div class="temp">
     <button class="ic big" data-step="-1" title="${esc(minus)}"><ha-icon icon="mdi:minus"></ha-icon></button>
-    <div class="temp-val" style="--c:${color}">${text}</div>
+    <div class="temp-val" style="--c:${esc(color)}">${text}</div>
     <button class="ic big" data-step="1" title="${esc(plus)}"><ha-icon icon="mdi:plus"></ha-icon></button>
     <input type="range" class="temp-range" min="${min}" max="${max}" step="${step}" value="${value}" data-range>
   </div>`;

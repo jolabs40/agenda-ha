@@ -1,12 +1,14 @@
 """Websocket API used by the panel.
 
 Agenda settings and shared settings require an admin user; events and the absence
-mode may also be edited by other users when the shared settings allow it.
+mode may also be edited by other users when the shared settings allow it. Event actions
+run as scripts with full rights, so only admins may set or change them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+import copy
 from datetime import date, datetime, timedelta
 from functools import wraps
 from typing import Any
@@ -23,7 +25,7 @@ from homeassistant.util import dt as dt_util
 from . import devices, recurrence
 from .const import DOMAIN, SIGNAL_UPDATED
 from .manager import Agenda
-from .migration import upgrade_repeat
+from .migration import COLOR, upgrade_repeat
 from .shared import Shared
 
 STATE_SCHEMA = vol.Any(
@@ -64,6 +66,8 @@ def _drop_empty_except(repeat: dict[str, Any]) -> dict[str, Any]:
     return repeat
 
 
+CALENDARS = vol.All([vol.Any(recurrence.HOLIDAYS_CALENDAR, cv.entity_domain("calendar"))], vol.Unique())
+
 REPEAT_SCHEMA = vol.All(
     # a page loaded before the update still sends a single calendar
     upgrade_repeat,
@@ -76,10 +80,10 @@ REPEAT_SCHEMA = vol.All(
             vol.Optional("exclude", default=[]): [cv.date],
             vol.Optional("include", default=[]): [cv.date],
             vol.Optional("holidays", default=recurrence.HOLIDAYS_IGNORE): vol.In(recurrence.HOLIDAYS_MODES),
-            vol.Optional("calendars", default=[]): vol.All([cv.entity_domain("calendar")], vol.Unique()),
+            vol.Optional("calendars", default=[]): CALENDARS,
             vol.Optional("calendar_mode", default=recurrence.CALENDAR_EXCLUDE): vol.In(recurrence.CALENDAR_MODES),
             vol.Optional("calendar_match", default=recurrence.CALENDAR_ANY): vol.In(recurrence.CALENDAR_MATCHES),
-            vol.Optional("except_calendars"): vol.All([cv.entity_domain("calendar")], vol.Unique()),
+            vol.Optional("except_calendars"): CALENDARS,
             vol.Optional("except_match"): vol.In(recurrence.CALENDAR_MATCHES),
             vol.Optional("period", default=recurrence.PERIOD_ALWAYS): vol.In(recurrence.PERIODS),
             vol.Optional("monthly", default=recurrence.MONTHLY_DAY): vol.In(recurrence.MONTHLY_MODES),
@@ -114,8 +118,8 @@ EVENT_SCHEMA = vol.Schema(
         vol.Optional("id"): vol.Any(None, cv.string),
         vol.Optional("name", default=""): str,
         vol.Optional("icon", default=None): vol.Any(None, str),
-        vol.Optional("color", default=None): vol.Any(None, str),
-        vol.Optional("text_color", default=None): vol.Any(None, str),
+        vol.Optional("color", default=None): vol.Any(None, vol.Match(COLOR)),
+        vol.Optional("text_color", default=None): vol.Any(None, vol.Match(COLOR)),
         vol.Optional("enabled", default=True): bool,
         vol.Optional("all_day", default=False): bool,
         vol.Required("start"): cv.string,
@@ -133,7 +137,7 @@ EVENT_SCHEMA = vol.Schema(
 
 SETTINGS_SCHEMA = vol.Schema(
     {
-        vol.Optional("color"): str,
+        vol.Optional("color"): vol.Match(COLOR),
         vol.Optional("icon"): str,
         vol.Optional("kind"): vol.In(devices.KINDS),
         vol.Optional("entities"): [cv.entity_id],
@@ -166,6 +170,11 @@ def _event_json(event: dict[str, Any]) -> dict[str, Any]:
     repeat["exclude"] = sorted({str(d) for d in repeat.get("exclude") or []})
     repeat["include"] = sorted({str(d) for d in repeat.get("include") or []})
     return {**event, "repeat": repeat}
+
+
+def _keep_actions(event: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, Any]:
+    """The actions of the stored event, none for a new one: what a non-admin user may save."""
+    return {**event, **{key: copy.deepcopy((stored or {}).get(key) or []) for key in ("start_actions", "end_actions")}}
 
 
 def _agendas(hass: HomeAssistant) -> dict[str, Agenda]:
@@ -241,11 +250,13 @@ async def ws_occurrences(hass: HomeAssistant, connection: websocket_api.ActiveCo
     if not start < end <= start + timedelta(days=62):
         connection.send_error(msg["id"], "invalid_format", "invalid period (62 days at most)")
         return
-    agendas = {entry_id: await agenda.async_occurrences_dict(start, end) for entry_id, agenda in _agendas(hass).items()}
+    found = {entry_id: await agenda.async_occurrences_dict(start, end) for entry_id, agenda in _agendas(hass).items()}
     connection.send_result(
         msg["id"],
         {
-            "agendas": agendas,
+            "agendas": {entry_id: occs for entry_id, (occs, _) in found.items()},
+            # a page from an older version ignores this key
+            "skipped": {entry_id: skipped for entry_id, (_, skipped) in found.items()},
             "holidays": _shared(hass).between(start.date(), end.date()),
             "vacation": await _shared(hass).async_vacation_between(start.date(), end.date()),
         },
@@ -297,8 +308,11 @@ async def _guard(connection, msg, coro_factory) -> None:
 @websocket_api.async_response
 async def ws_save_event(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def run():
+        agenda = _agenda(hass, msg["entry_id"])
         event = _event_json(EVENT_SCHEMA(msg["event"]))
-        return await _agenda(hass, msg["entry_id"]).async_save_event(event)
+        if not connection.user.is_admin:
+            event = _keep_actions(event, agenda.event(event["id"]) if event.get("id") else None)
+        return await agenda.async_save_event(event)
 
     await _guard(connection, msg, run)
 
@@ -333,10 +347,14 @@ async def ws_delete_event(hass: HomeAssistant, connection: websocket_api.ActiveC
 @websocket_api.async_response
 async def ws_detach(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
     async def run():
+        agenda = _agenda(hass, msg["entry_id"])
         replacement = msg.get("event")
         if replacement is not None:
             replacement = _event_json(EVENT_SCHEMA(replacement))
-        return await _agenda(hass, msg["entry_id"]).async_detach(msg["event_id"], msg["day"], replacement)
+            if not connection.user.is_admin:
+                # the day moved out of the series keeps the series' actions
+                replacement = _keep_actions(replacement, agenda.event(msg["event_id"]))
+        return await agenda.async_detach(msg["event_id"], msg["day"], replacement)
 
     await _guard(connection, msg, run)
 

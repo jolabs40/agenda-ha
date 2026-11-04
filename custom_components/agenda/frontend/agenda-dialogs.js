@@ -2,8 +2,21 @@
 // the panel's #dialog container and resolves a promise when closed.
 
 const V = new URL(import.meta.url).search;
-const { DAY, esc, fmtDay, friendlyName, loadHaComponents, monthlyLabel, wall, wallDate, wallTime, weekday, wm } =
-  await import(`./agenda-lib.js${V}`);
+const {
+  DAY,
+  HOLIDAYS,
+  calendarName,
+  esc,
+  fmtDay,
+  friendlyName,
+  loadHaComponents,
+  monthlyLabel,
+  wall,
+  wallDate,
+  wallTime,
+  weekday,
+  wm,
+} = await import(`./agenda-lib.js${V}`);
 
 const SUN_LIMIT = 720; // minutes of offset, as on the server
 
@@ -270,6 +283,8 @@ export function eventEditor(host, opts) {
         };
   ev.start_actions = ev.start_actions || [];
   ev.end_actions = ev.end_actions || [];
+  // actions run as scripts with full rights: the server takes them from admins only
+  const admin = Boolean(hass.user?.is_admin);
   ev.start_sun = ev.start_sun || null;
   ev.end_sun = ev.end_sun || null;
   ev.conditions = structuredClone(ev.conditions || []);
@@ -322,7 +337,7 @@ export function eventEditor(host, opts) {
 
   const dlg = new Dialog(host, { title: isNew ? T.create_event : T.edit_event, wide: true });
   const agendaChip = () =>
-    `<span class="dlg-agenda"><span class="dot" style="--c:${agenda.settings.color}"></span>${esc(agenda.name)}</span>`;
+    `<span class="dlg-agenda"><span class="dot" style="--c:${esc(agenda.settings.color)}"></span>${esc(agenda.name)}</span>`;
 
   const scopeBar = occ
     ? `<div class="scope">
@@ -357,11 +372,15 @@ export function eventEditor(host, opts) {
         <label class="fld"><span>${esc(T.icon)}</span><input class="inp" data-f="icon" value="${esc(ev.icon || "")}" placeholder="mdi:radiator"></label>
       </div>
     </details>
-    <details class="more" ${ev.start_actions.length || ev.end_actions.length ? "open" : ""}><summary>${esc(T.start_actions)} / ${esc(T.end_actions)}<span data-acount></span></summary>
+    ${
+      admin
+        ? `<details class="more" ${ev.start_actions.length || ev.end_actions.length ? "open" : ""}><summary>${esc(T.start_actions)} / ${esc(T.end_actions)}<span data-acount></span></summary>
       <p class="hint">${esc(T.actions_hint)}</p>
       <h4>${esc(T.start_actions)}</h4><div data-actions="start_actions"></div>
       <h4>${esc(T.end_actions)}</h4><div data-actions="end_actions"></div>
-    </details>
+    </details>`
+        : ""
+    }
     <details class="more" ${ev.note ? "open" : ""}><summary>${esc(T.note)}</summary>
       <textarea class="inp" rows="2" data-f="note">${esc(ev.note || "")}</textarea></details>
     <label class="tgl"><input type="checkbox" data-f="enabled" ${ev.enabled === false ? "" : "checked"}><span></span>${esc(T.enabled_event)}</label>`;
@@ -550,16 +569,17 @@ export function eventEditor(host, opts) {
           )
           .join("");
       const taken = [...cal.only, ...cal.except];
-      const free = calendars().filter((c) => !taken.includes(c.entity_id));
+      // the public holidays come first, as a calendar of their own
+      const free = [{ entity_id: HOLIDAYS }, ...calendars()].filter((c) => !taken.includes(c.entity_id));
       const side = (key) => `<div class="calside">
           <span class="sub">${esc(key === "only" ? T.calendar_only : T.calendar_exclude)}</span>
           <div class="pills">${cal[key]
             .map(
               (id) =>
-                `<span class="pill">${esc(friendlyName(hass, id))}<button data-rm-cal="${key}:${esc(id)}">×</button></span>`,
+                `<span class="pill">${esc(calendarName(hass, id, T))}<button data-rm-cal="${key}:${esc(id)}">×</button></span>`,
             )
             .join("")}
-            ${free.length ? `<select class="inp" data-cal="${key}"><option value="">${esc(T.add_calendar)}</option>${free.map((c) => `<option value="${esc(c.entity_id)}">${esc(friendlyName(hass, c.entity_id))}</option>`).join("")}</select>` : ""}
+            ${free.length ? `<select class="inp" data-cal="${key}"><option value="">${esc(T.add_calendar)}</option>${free.map((c) => `<option value="${esc(c.entity_id)}">${esc(calendarName(hass, c.entity_id, T))}</option>`).join("")}</select>` : ""}
           </div>
           ${cal[key].length > 1 ? `<select class="inp" data-cal-match="${key}">${["any", "all"].map((m) => `<option value="${m}" ${cal[`${key}_match`] === m ? "selected" : ""}>${esc(T[`calendar_${m}`])}</option>`).join("")}</select>` : ""}
         </div>`;
@@ -658,8 +678,9 @@ export function eventEditor(host, opts) {
       const box = dlg.$("[data-swatches]");
       const auto = !ev.color;
       box.innerHTML = `<button class="swatch auto ${auto ? "on" : ""}" data-color="">${esc(T.auto)}</button>${SWATCHES.map(
-        (c) => `<button class="swatch ${ev.color === c ? "on" : ""}" data-color="${c}" style="--c:${c}"></button>`,
-      ).join("")}<input type="color" class="swatch-input" data-color-input value="${ev.color || "#ef6c00"}">`;
+        (c) =>
+          `<button class="swatch ${ev.color === c ? "on" : ""}" data-color="${esc(c)}" style="--c:${esc(c)}"></button>`,
+      ).join("")}<input type="color" class="swatch-input" data-color-input value="${esc(ev.color || "#ef6c00")}">`;
       box.querySelectorAll("[data-color]").forEach((b) =>
         b.addEventListener("click", () => {
           ev.color = b.dataset.color || null;
@@ -696,7 +717,7 @@ export function eventEditor(host, opts) {
   });
 
   const updaters = [];
-  for (const key of ["start_actions", "end_actions"]) {
+  for (const key of admin ? ["start_actions", "end_actions"] : []) {
     actionEditor(
       dlg.$(`[data-actions="${key}"]`),
       hass,
@@ -710,7 +731,7 @@ export function eventEditor(host, opts) {
     ).then((u) => updaters.push(u));
   }
   const n0 = ev.start_actions.length + ev.end_actions.length;
-  dlg.$("[data-acount]").textContent = n0 ? ` · ${n0}` : "";
+  if (admin) dlg.$("[data-acount]").textContent = n0 ? ` · ${n0}` : "";
 
   const build = () => {
     const f = F();
@@ -871,8 +892,9 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
       const box = dlg.$("[data-swatches]");
       box.innerHTML =
         SWATCHES.map(
-          (c) => `<button class="swatch ${cfg.color === c ? "on" : ""}" data-color="${c}" style="--c:${c}"></button>`,
-        ).join("") + `<input type="color" class="swatch-input" data-color-input value="${cfg.color}">`;
+          (c) =>
+            `<button class="swatch ${cfg.color === c ? "on" : ""}" data-color="${esc(c)}" style="--c:${esc(c)}"></button>`,
+        ).join("") + `<input type="color" class="swatch-input" data-color-input value="${esc(cfg.color)}">`;
       box.querySelectorAll("[data-color]").forEach((b) =>
         b.addEventListener("click", () => {
           cfg.color = b.dataset.color;
@@ -1011,7 +1033,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
       sec.innerHTML = `<div class="row">
           <label class="fld sm"><span>${esc(T.country)}</span><select class="inp" data-country>
             <option value="">${esc(haCountry ? T.ha_country(regionName(haCountry, lang)) : T.no_ha_country)}</option>
-            ${named.map(([c, n]) => `<option value="${c}" ${hol.country === c ? "selected" : ""}>${esc(n)}</option>`).join("")}
+            ${named.map(([c, n]) => `<option value="${esc(c)}" ${hol.country === c ? "selected" : ""}>${esc(n)}</option>`).join("")}
           </select></label>
           ${
             subdivisions.length
@@ -1152,10 +1174,14 @@ export const DIALOG_STYLES = `
   .cond select.inp, .cond input.inp:not(.grow) { width: auto; max-width: 150px; }
   h4 { margin: 10px 0 4px; font-size: 13px; font-weight: 600; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .chip { font: inherit; border: 2px solid transparent; border-radius: 99px; padding: 6px 14px; cursor: pointer; font-weight: 600; font-size: 13.5px;
-    background: color-mix(in srgb, var(--c) 28%, var(--card-background-color)); color: var(--primary-text-color); transition: transform .1s, background .15s; }
-  .chip:hover { transform: translateY(-1px); }
-  .chip.on { background: var(--c); color: var(--t); border-color: color-mix(in srgb, var(--c) 60%, #000); box-shadow: 0 2px 8px color-mix(in srgb, var(--c) 45%, transparent); }
+  .chip { font: inherit; display: inline-flex; align-items: center; gap: 4px; border: 2px solid transparent; border-radius: 99px; padding: 6px 14px;
+    cursor: pointer; font-weight: 600; font-size: 13.5px; background: color-mix(in srgb, var(--c) 16%, var(--card-background-color));
+    color: color-mix(in srgb, var(--primary-text-color) 72%, transparent); transition: transform .1s, background .15s; }
+  .chip:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--c) 30%, var(--card-background-color)); }
+  .chip.on { background: var(--c); color: var(--t); border-color: var(--primary-text-color); padding-left: 10px;
+    box-shadow: 0 0 0 2px var(--card-background-color), 0 2px 10px color-mix(in srgb, var(--c) 55%, transparent); }
+  .chip ha-icon { --mdc-icon-size: 16px; }
+  .chip:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
   .temp { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px 14px; margin-top: 12px; }
   .temp-val { text-align: center; font-size: 44px; font-weight: 300; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--c) 70%, var(--primary-text-color)); }
   .temp-val small { font-size: 18px; margin-left: 2px; }

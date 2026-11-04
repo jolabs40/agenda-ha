@@ -334,6 +334,7 @@ class Agenda:
             for event in self.events
             for key in ("calendars", "except_calendars")
             for calendar in (event.get("repeat") or {}).get(key) or ()
+            if calendar != recurrence.HOLIDAYS_CALENDAR
         }
         school = self.shared.school_calendar
         if school and any(
@@ -464,6 +465,20 @@ class Agenda:
             async with self._run_lock:
                 await self.async_apply_state(force=True)
         self._notify()
+        self._refresh_dependents()
+
+    @callback
+    def _refresh_dependents(self) -> None:
+        """Agendas that use this one's calendar as a condition read it again now.
+
+        An edit seldom changes the calendar's state, so their state listener stays silent.
+        """
+        calendar = self.agenda_entities().get("calendar")
+        for other in self.hass.data[DOMAIN]["agendas"].values():
+            if other is not self and calendar in other.condition_calendars():
+                self.hass.async_create_background_task(
+                    other.async_refresh_calendars(), f"{DOMAIN} {other.name} calendars"
+                )
 
     async def async_validate_event(self, event: dict[str, Any]) -> None:
         try:
@@ -688,15 +703,31 @@ class Agenda:
             "agenda_entities": self.agenda_entities(),
         }
 
-    async def async_occurrences_dict(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
+    def _occ_dict(self, occ: recurrence.Occurrence) -> dict[str, Any]:
+        return {
+            "event_id": occ.event_id,
+            "day": occ.day.isoformat(),
+            "start": wall(occ.start, self.tz),
+            "end": wall(occ.end, self.tz),
+            "all_day": occ.all_day,
+        }
+
+    async def async_occurrences_dict(
+        self, start: datetime, end: datetime
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Occurrences over [start, end), and those a calendar condition removes, for the panel.
+
+        "busy" names the condition calendars with something on the day: the week marks them.
+        """
         ctx = await self.async_context_for(start, end)
-        return [
-            {
-                "event_id": occ.event_id,
-                "day": occ.day.isoformat(),
-                "start": wall(occ.start, self.tz),
-                "end": wall(occ.end, self.tz),
-                "all_day": occ.all_day,
-            }
-            for occ in self.occurrences(start, end, ctx)
+
+        def entry(occ: recurrence.Occurrence, **extra: Any) -> dict[str, Any]:
+            busy = recurrence.busy_calendars(self.event(occ.event_id), occ.day, ctx)
+            return {**self._occ_dict(occ), **extra, **({"busy": busy} if busy else {})}
+
+        skipped = [
+            entry(occ, reason=reason)
+            for event in self.events
+            for occ, reason in recurrence.skipped(event, self.tz, start, end, ctx)
         ]
+        return [entry(occ) for occ in self.occurrences(start, end, ctx)], skipped

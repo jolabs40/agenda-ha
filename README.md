@@ -24,9 +24,14 @@ agenda goes back to its default state.
   - Week: click an empty slot to add an event, drag a block to move it, pull its bottom edge to
     make it longer. Moving a repeated event asks whether it applies to that day or the whole series.
     On a touch screen, a long press picks a block up. A day can be copied to other days of the week.
+    A block names the calendars its event depends on, and outlines the one that makes it run that
+    day; the days a calendar takes out of a series show hatched.
   - Month: each day's events, with public and school holidays.
   - House: every agenda over one day, with what each device is doing now.
   - List: all events and how they repeat.
+- On a wide screen the agendas are listed in a column, as in the Calendar panel: tick the ones to
+  show, see what each one is doing and its next change, pause it or open its settings. On a phone,
+  chips at the top do the same. The Add event button sits at the bottom right.
 - Events repeat every N days, weeks (on chosen weekdays, or on even or odd weeks only) or months
   (on the same date, on the 2nd Monday, on the last Friday...), optionally until a date. Single
   days can be removed from or added to a series.
@@ -37,6 +42,8 @@ agenda goes back to its default state.
 - Calendars can act as conditions: skip the days with an event in them (trips, absences), keep
   only those days, or both on the same event. With several calendars, an event in one of them is
   enough, or one is needed in each of them.
+  Public holidays can be one of these calendars, for an event that runs on home office days or on
+  public holidays.
 - A school holiday calendar can be set once for all agendas. Each repeating event then applies
   always, only during school term, or only during school holidays, and the week view marks the
   holidays.
@@ -47,7 +54,7 @@ agenda goes back to its default state.
   pauses the agenda, Now and Next change sensors.
 - Actions for automations and voice assistants: skip the next occurrence, add or remove dates,
   start or end the absence mode.
-- Non-admin users can be allowed to edit events.
+- Non-admin users can be allowed to edit events; start and end actions stay with administrators.
 - After a restart the linked devices are put back in the state the agenda expects (can be turned
   off per agenda).
 - A dashboard card, `custom:agenda-card`.
@@ -81,8 +88,8 @@ Without HACS, unzip `agenda.zip` from the [latest release](https://github.com/jo
 into a `custom_components/agenda` folder of your configuration (or copy that folder from this
 repository) and restart Home Assistant.
 
-Then add the Agenda integration from Settings > Devices & services. Each entry is one agenda;
-more can be created from the panel with the + button. Everything else is set up in the Agenda
+Then add the Agenda integration from Settings > Devices & services. Each entry is one agenda; more
+can be created from the panel with the New agenda button. Everything else is set up in the Agenda
 panel.
 
 Requires Home Assistant 2024.7 or later. The `holidays` package is installed automatically. The
@@ -116,6 +123,9 @@ Actions work as in automations, with three extra variables:
   data:
     message: "{{ event.name }} ({{ agenda }}) {{ 'starts' if phase == 'start' else 'ends' }}"
 ```
+
+Only administrators set actions. Users allowed to edit events do not see them, and their changes
+keep the actions already in place.
 
 ## Sunrise, sunset and conditions
 
@@ -159,6 +169,11 @@ no action. At the end every agenda goes back to its schedule.
 They follow the country set in Settings > System > General. Another country, or a region (a US
 state, a German Land, Alsace-Moselle...), can be picked in the settings of any agenda and applies
 to all of them.
+
+In the exceptions of an event, Public holidays also comes first in the calendar lists. The Public
+holidays setting always narrows the days down, whereas a list combines its calendars: with Home
+office and Public holidays under Only on days with an event (in at least one of them, the default),
+the event runs on home office days and on public holidays alike.
 
 ## School holidays
 

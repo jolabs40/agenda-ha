@@ -28,9 +28,15 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
     glisser, on l'allonge en tirant son bord bas. Pour un événement répété, on choisit entre ce
     jour seulement et toute la série. Sur un écran tactile, un appui long saisit le bloc. Une
     journée se copie vers d'autres jours de la semaine.
+    Un bloc nomme les calendriers dont dépend son événement et entoure celui qui le déclenche ce
+    jour-là ; les jours qu'un calendrier retire d'une série apparaissent hachurés.
   - Mois : les événements de chaque jour, avec les jours fériés et les vacances scolaires.
   - Maison : tous les agendas sur une journée, avec ce que fait chaque appareil en ce moment.
   - Liste : tous les événements et leur répétition.
+- Sur un grand écran, les agendas sont listés dans une colonne, comme dans le panneau Calendrier :
+  on coche ceux à afficher, on voit ce que fait chacun et son prochain changement, on le suspend ou
+  on ouvre ses réglages. Sur un téléphone, des pastilles en haut font de même. Le bouton Ajouter un
+  événement se trouve en bas à droite.
 - Répétition tous les N jours, semaines (jours au choix, ou seulement les semaines paires ou
   impaires) ou mois (même date, 2e lundi, dernier vendredi...), éventuellement jusqu'à une date.
   On peut retirer ou ajouter des jours à une série.
@@ -41,6 +47,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 - Des calendriers peuvent servir de condition : sauter les jours où ils ont un événement
   (déplacements, absences), ne garder que ceux-là, ou les deux sur le même événement. Avec plusieurs
   calendriers, un événement dans l'un d'eux suffit, ou il en faut un dans chacun.
+  Les jours fériés peuvent être l'un de ces calendriers, pour un événement qui tourne les jours de
+  télétravail ou les jours fériés.
 - Un calendrier des vacances scolaires se choisit une fois pour tous les agendas. Chaque événement
   répété s'applique alors toujours, seulement en période scolaire ou seulement pendant les
   vacances, et la vue Semaine signale les vacances.
@@ -51,7 +59,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   interrupteur Actif qui le suspend, les capteurs En ce moment et Prochain changement.
 - Des actions pour les automatisations et les assistants vocaux : sauter la prochaine occurrence,
   ajouter ou retirer des dates, démarrer ou terminer le mode absence.
-- Les utilisateurs non administrateurs peuvent être autorisés à modifier les événements.
+- Les utilisateurs non administrateurs peuvent être autorisés à modifier les événements ; les
+  actions de début et de fin restent aux administrateurs.
 - Après un redémarrage, les appareils liés sont remis dans l'état prévu (désactivable par agenda).
 - Une carte de tableau de bord, `custom:agenda-card`.
 - En français, anglais, allemand et néerlandais.
@@ -84,8 +93,9 @@ Sans HACS, décompresser `agenda.zip`, joint à la [dernière version](https://g
 dans un dossier `custom_components/agenda` de la configuration (ou copier ce dossier depuis le
 dépôt), puis redémarrer Home Assistant.
 
-Ajouter ensuite l'intégration Agenda depuis Paramètres > Appareils et services. Chaque entrée est
-un agenda ; le bouton + du panneau en crée d'autres. Tout le reste se règle dans le panneau Agenda.
+Ajouter ensuite l'intégration Agenda depuis Paramètres > Appareils et services. Chaque entrée est un
+agenda ; le bouton Nouvel agenda du panneau en crée d'autres. Tout le reste se règle dans le panneau
+Agenda.
 
 Home Assistant 2024.7 ou plus récent. Le paquet `holidays` s'installe tout seul. L'icône de
 l'intégration s'affiche à partir de Home Assistant 2026.3.
@@ -118,6 +128,9 @@ Les actions fonctionnent comme dans les automatisations, avec trois variables en
   data:
     message: "{{ event.name }} ({{ agenda }}) {{ 'commence' if phase == 'start' else 'se termine' }}"
 ```
+
+Seuls les administrateurs règlent les actions. Les utilisateurs autorisés à modifier les
+événements ne les voient pas, et leurs modifications gardent les actions en place.
 
 ## Lever, coucher du soleil et conditions
 
@@ -162,6 +175,11 @@ programme.
 Ils suivent le pays réglé dans Paramètres > Système > Général. Un autre pays, ou une région
 (Alsace-Moselle, outre-mer...), se choisit dans les réglages de n'importe quel agenda et vaut pour
 tous.
+
+Dans les exceptions d'un événement, Jours fériés figure aussi en tête des listes de calendriers.
+Le réglage Jours fériés restreint toujours les jours, alors qu'une liste combine ses calendriers :
+avec Télétravail et Jours fériés sous Seulement les jours avec un événement (dans au moins l'un
+d'eux, le choix par défaut), l'événement tourne les jours de télétravail comme les jours fériés.
 
 ## Vacances scolaires
 

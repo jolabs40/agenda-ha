@@ -29,9 +29,15 @@ Assistant in het Nederlands staat.
     te slepen en verleng je door aan de onderrand te trekken. Bij een herhaalde gebeurtenis kies je
     tussen alleen deze dag en de hele reeks. Op een aanraakscherm pakt lang drukken het blok op.
     Een dag kun je naar andere dagen van de week kopiëren.
+    Een blok noemt de kalenders waarvan zijn gebeurtenis afhangt, en omlijnt degene die hem die dag
+    laat lopen; dagen die een kalender uit een reeks haalt, verschijnen gearceerd.
   - Maand: de gebeurtenissen van elke dag, met feestdagen en schoolvakanties.
   - Huis: alle agenda's over één dag, met wat elk apparaat nu doet.
   - Lijst: alle gebeurtenissen en hun herhaling.
+- Op een breed scherm staan de agenda's in een kolom, zoals in het Kalender-paneel: vink aan welke
+  je wilt zien, zie wat elke agenda nu doet en wanneer hij wisselt, pauzeer hem of open zijn
+  instellingen. Op een telefoon doen chips bovenaan hetzelfde. De knop Gebeurtenis toevoegen staat
+  rechtsonder.
 - Herhaling elke N dagen, weken (op gekozen weekdagen, of alleen in even of oneven weken) of
   maanden (op dezelfde datum, op de 2e maandag, op de laatste vrijdag...), eventueel tot een datum.
   Losse dagen kun je uit een reeks halen of eraan toevoegen.
@@ -43,6 +49,8 @@ Assistant in het Nederlands staat.
 - Kalenders kunnen als voorwaarde dienen: dagen met een gebeurtenis erin overslaan (reizen,
   afwezigheden), alleen die dagen houden, of allebei bij dezelfde gebeurtenis. Bij meerdere
   kalenders volstaat een gebeurtenis in één ervan, of moet er een in elk staan.
+  De feestdagen kunnen een van deze kalenders zijn, voor een gebeurtenis die op thuiswerkdagen of
+  op feestdagen loopt.
 - Een kalender van de schoolvakanties kies je één keer voor alle agenda's. Elke herhaalde
   gebeurtenis geldt dan altijd, alleen in de schoolperiode of alleen in de schoolvakantie, en het
   weekoverzicht markeert de vakanties.
@@ -54,7 +62,8 @@ Assistant in het Nederlands staat.
   de agenda pauzeert, de sensoren Nu en Volgende wijziging.
 - Acties voor automatiseringen en spraakassistenten: de volgende gebeurtenis overslaan, datums
   toevoegen of verwijderen, de afwezigheidsmodus starten of beëindigen.
-- Gebruikers zonder beheerdersrechten kunnen gebeurtenissen mogen bewerken.
+- Gebruikers zonder beheerdersrechten kunnen gebeurtenissen mogen bewerken; start- en eindacties
+  blijven bij de beheerders.
 - Na een herstart worden de gekoppelde apparaten in de toestand gezet die de agenda verwacht (per
   agenda uit te schakelen).
 - Een dashboardkaart, `custom:agenda-card`.
@@ -89,7 +98,8 @@ uitpakken in een map `custom_components/agenda` van je configuratie (of die map 
 kopiëren) en Home Assistant herstarten.
 
 Daarna de integratie Agenda toevoegen via Instellingen > Apparaten & diensten. Elk item is één
-agenda; meer maak je in het paneel met de knop +. Al het andere stel je in het Agenda-paneel in.
+agenda; meer maak je in het paneel met de knop Nieuwe agenda. Al het andere stel je in het
+Agenda-paneel in.
 
 Vereist Home Assistant 2024.7 of nieuwer. Het pakket `holidays` wordt automatisch geïnstalleerd.
 Het pictogram van de integratie verschijnt vanaf Home Assistant 2026.3.
@@ -124,6 +134,9 @@ Acties werken zoals in automatiseringen, met drie extra variabelen:
   data:
     message: "{{ event.name }} ({{ agenda }}) {{ 'begint' if phase == 'start' else 'eindigt' }}"
 ```
+
+Alleen beheerders stellen acties in. Gebruikers die gebeurtenissen mogen bewerken, zien ze niet, en
+hun wijzigingen houden de bestaande acties.
 
 ## Zonsopgang, zonsondergang en voorwaarden
 
@@ -168,6 +181,11 @@ naar haar programma.
 Ze volgen het land dat is ingesteld onder Instellingen > Systeem > Algemeen. Een ander land, of een
 regio (een Duitse deelstaat, een Amerikaanse staat...), kies je in de instellingen van een
 willekeurige agenda en geldt voor alle agenda's.
+
+In de uitzonderingen van een gebeurtenis staat Feestdagen ook bovenaan de kalenderlijsten. De
+instelling Feestdagen beperkt de dagen altijd, een lijst combineert juist haar kalenders: met
+Thuiswerk en Feestdagen onder Alleen op dagen met een gebeurtenis (in minstens één ervan, de
+standaard) loopt de gebeurtenis op thuiswerkdagen en op feestdagen.
 
 ## Schoolvakanties
 

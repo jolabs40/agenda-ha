@@ -107,6 +107,7 @@ class AgendaCard extends HTMLElement {
         end: wallDate(first + days * DAY),
       });
       this._occ = res.agendas || {};
+      this._skipped = res.skipped || {};
       this._holidays = res.holidays || {};
       this._vacation = res.vacation || {};
       this._error = null;
@@ -129,7 +130,9 @@ class AgendaCard extends HTMLElement {
         hass: this._hass,
         T,
         agendas: this._agendas(),
+        allAgendas: this._data.agendas,
         occ: this._occ || {},
+        skipped: this._skipped || {},
         holidays: this._holidays || {},
         vacation: this._vacation || {},
         now,

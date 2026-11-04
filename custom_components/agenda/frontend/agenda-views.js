@@ -6,6 +6,8 @@ const {
   DAY,
   dayOf,
   effectiveTimeline,
+  HOLIDAYS,
+  calendarName,
   esc,
   fmtDay,
   repeatSummary,
@@ -38,15 +40,21 @@ export function fitLabels(root) {
     if (span.offsetWidth > box.clientWidth - 4 || span.offsetHeight > box.clientHeight)
       span.style.visibility = "hidden";
   });
-  root.querySelectorAll(".ev").forEach((ev) => {
+  root.querySelectorAll(".ev, .ghost").forEach((ev) => {
     const sub = ev.querySelector(".ev-sub");
     if (sub) sub.style.display = ev.clientHeight < 34 ? "none" : "";
+    const cond = ev.querySelector(".ev-cond");
+    if (cond) {
+      cond.style.display = "";
+      if (cond.offsetTop + cond.offsetHeight > ev.clientHeight) cond.style.display = "none";
+    }
   });
 }
 
 /**
- * ctx: { hass, T, agendas, occ: {entry_id: [occ]}, holidays: {day: name}, vacation: {day: name},
- *        firstDay, days, now, hourH, editable }
+ * ctx: { hass, T, agendas, allAgendas, occ: {entry_id: [occ]}, skipped: {entry_id: [occ with reason]},
+ *        holidays: {day: name}, vacation: {day: name}, firstDay, days, now, hourH, editable }
+ * allAgendas names the agendas used as condition calendars, shown or not.
  */
 export function renderWeek(ctx) {
   const { hass, T, agendas, firstDay, days, now, hourH, editable } = ctx;
@@ -83,18 +91,60 @@ export function renderWeek(ctx) {
     (_, h) => `<div class="wk-h"><span>${h ? `${String(h).padStart(2, "0")}:00` : ""}</span></div>`,
   ).join("");
 
-  // pieces per day, all agendas together
+  // pieces per day, all agendas together; ghosts are the days a calendar condition removes
   const perDay = Object.fromEntries(dayList.map((d) => [d, []]));
+  const ghosts = Object.fromEntries(dayList.map((d) => [d, []]));
   for (const agenda of agendas) {
     const byId = Object.fromEntries(agenda.events.map((e) => [e.id, e]));
-    const split = splitByDay(ctx.occ[agenda.entry_id] || [], firstDay, days);
-    for (const d of dayList) {
-      for (const piece of split[d]) {
-        const event = byId[piece.occ.event_id];
-        if (event) perDay[d].push({ ...piece, agenda, event });
+    for (const [occs, into] of [
+      [ctx.occ[agenda.entry_id], perDay],
+      [ctx.skipped?.[agenda.entry_id], ghosts],
+    ]) {
+      const split = splitByDay(occs || [], firstDay, days);
+      for (const d of dayList) {
+        for (const piece of split[d]) {
+          const event = byId[piece.occ.event_id];
+          if (event) into[d].push({ ...piece, agenda, event });
+        }
       }
     }
   }
+  const timeOf = (occ) => {
+    const end = wallTime(wm(occ.end));
+    return occ.all_day ? T.all_day : `${wallTime(wm(occ.start))}–${end === "00:00" ? "24:00" : end}`;
+  };
+  // the calendars a repeating event depends on: + only their days, - except their days
+  const all = ctx.allAgendas || agendas;
+  const names = Object.fromEntries(all.map((a) => [a.agenda_entities?.calendar, a.name]));
+  const colors = Object.fromEntries(all.map((a) => [a.agenda_entities?.calendar, a.settings.color]));
+  const nameOf = (id) => names[id] || calendarName(hass, id, T);
+  const colorOf = (id) => (id === HOLIDAYS ? "var(--agenda-holiday)" : colors[id] || "currentColor");
+  const conditions = (event) => {
+    const r = event.repeat || {};
+    if (!r.freq || r.freq === "none") return [];
+    const only = r.calendar_mode === "only";
+    return [
+      ...(r.calendars || []).map((id) => [only, id]),
+      ...(only ? r.except_calendars || [] : []).map((id) => [false, id]),
+    ];
+  };
+  // the calendar with something that day gets its colour around it: what runs or skips the event
+  const condHtml = (event, occ) => {
+    const list = conditions(event);
+    if (!list.length) return "";
+    const busy = occ.busy || [];
+    const items = list.map(([plus, id]) => {
+      const hit = busy.includes(id) ? ` class="hit" style="--k:${esc(colorOf(id))}"` : "";
+      return `<span${hit}><ha-icon icon="mdi:${plus ? "plus" : "minus"}"></ha-icon><em>${esc(nameOf(id))}</em></span>`;
+    });
+    return `<div class="ev-cond">${items.join("")}</div>`;
+  };
+  const condText = (event) =>
+    conditions(event)
+      .map(([plus, id]) => `${plus ? "+" : "-"} ${nameOf(id)}`)
+      .join(", ");
+  const mainLabel = (agenda, event) =>
+    hasStates(agenda) && event.state ? stateLabel(hass, agenda, event.state, T) : eventLabel(hass, agenda, event, T);
 
   const cols = dayList
     .map((d) => {
@@ -111,31 +161,44 @@ export function renderWeek(ctx) {
         for (const seg of effectiveTimeline(single, occs, d, d + DAY, true)) {
           if (seg.occ) continue;
           const h = seg.to - seg.from;
-          html += `<div class="gap" style="top:${pct(seg.from - d)};height:${pct(h)};--c:${color}" data-gap-day="${d}">
+          html += `<div class="gap" style="top:${pct(seg.from - d)};height:${pct(h)};--c:${esc(color)}" data-gap-day="${d}">
             ${h >= 45 ? `<span>${esc(label)}</span>` : ""}</div>`;
         }
+      }
+      for (const g of ghosts[d]) {
+        const { agenda, event, occ } = g;
+        const h = g.to - g.from;
+        const r = event.repeat || {};
+        const only = occ.reason === "only";
+        const ids = (only || r.calendar_mode !== "only" ? r.calendars : r.except_calendars) || [];
+        const why = `${only ? T.calendar_only : T.calendar_exclude} (${ids.map(nameOf).join(", ")})`;
+        const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), timeOf(occ), T.skipped, why];
+        const short = (h / 60) * hourH < 40;
+        const cond = short ? "" : condHtml(event, occ);
+        html += `<div class="ghost ${short ? "short" : ""} ${g.first ? "" : "cont"} ${g.last ? "" : "open"}"
+            style="top:${pct(g.from)};height:${pct(h)};--c:${esc(eventColor(hass, agenda, event))}"
+            data-entry="${esc(agenda.entry_id)}" data-ghost="${esc(event.id)}" title="${esc(tip.filter(Boolean).join(" · "))}">
+          <div class="ev-main">${esc(mainLabel(agenda, event))}</div>
+          ${short ? "" : `<div class="ev-sub">${esc(T.skipped)}</div>`}${cond}
+        </div>`;
       }
       for (const p of stack(perDay[d])) {
         const { agenda, event, occ } = p;
         const color = eventColor(hass, agenda, event);
         const tc = event.text_color || textColor(color);
         const h = p.to - p.from;
-        const main =
-          hasStates(agenda) && event.state
-            ? stateLabel(hass, agenda, event.state, T)
-            : eventLabel(hass, agenda, event, T);
+        const main = mainLabel(agenda, event);
         const subName = hasStates(agenda) && event.state && event.name ? event.name : "";
         const prefix = single ? "" : agenda.name;
-        const endTime = wallTime(wm(occ.end));
-        const time = occ.all_day ? T.all_day : `${wallTime(wm(occ.start))}–${endTime === "00:00" ? "24:00" : endTime}`;
+        const time = timeOf(occ);
         const short = (h / 60) * hourH < 40;
         const indent = Math.min(p.depth, 3) * 14;
         html += `<div class="ev ${short ? "short" : ""} ${occ.all_day ? "allday" : ""} ${p.first ? "" : "cont"} ${p.last ? "" : "open"}"
-            style="top:${pct(p.from)};height:${pct(h)};left:calc(${indent}% + 2px);z-index:${2 + p.depth};--c:${color};--t:${tc};--a:${agenda.settings.color}"
-            ${occData(agenda, occ)} title="${esc(`${prefix ? prefix + " · " : ""}${eventLabel(hass, agenda, event, T)} · ${time}`)}">
+            style="top:${pct(p.from)};height:${pct(h)};left:calc(${indent}% + 2px);z-index:${2 + p.depth};--c:${esc(color)};--t:${esc(tc)};--a:${esc(agenda.settings.color)}"
+            ${occData(agenda, occ)} title="${esc([prefix, eventLabel(hass, agenda, event, T), time, condText(event)].filter(Boolean).join(" · "))}">
           ${event.icon ? `<ha-icon icon="${esc(event.icon)}"></ha-icon>` : ""}
           <div class="ev-main">${esc(main)}</div>
-          ${short ? "" : `<div class="ev-sub">${esc([prefix, subName, time].filter(Boolean).join(" · "))}</div>`}
+          ${short ? "" : `<div class="ev-sub">${esc([prefix, subName, time].filter(Boolean).join(" · "))}</div>${condHtml(event, occ)}`}
           ${editable && !occ.all_day && p.last ? `<div class="ev-resize" data-resize="1"></div>` : ""}
         </div>`;
       }
@@ -200,7 +263,7 @@ export function renderMonth(ctx) {
             : eventLabel(hass, agenda, event, T);
         const time = occ.all_day ? "" : wallTime(wm(occ.start));
         const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), time].filter(Boolean).join(" · ");
-        return `<div class="mo-ev" ${occData(agenda, occ)} style="--c:${color};--t:${textColor(color)}" title="${esc(tip)}">
+        return `<div class="mo-ev" ${occData(agenda, occ)} style="--c:${esc(color)};--t:${esc(textColor(color))}" title="${esc(tip)}">
           ${time ? `<b>${time}</b>` : ""}<span>${esc(label)}</span></div>`;
       })
       .join("");
@@ -256,13 +319,13 @@ export function renderHouse(ctx) {
             label = "";
           }
           const tip = `${hhmm(seg.from - day)}–${hhmm(seg.to - day)}${label ? " · " + label : ""}`;
-          return `<div class="${cls}" style="left:${pct(seg.from - day)};width:${pct(w)};--c:${color};--t:${textColor(color)}" ${data} title="${esc(tip)}">
+          return `<div class="${cls}" style="left:${pct(seg.from - day)};width:${pct(w)};--c:${esc(color)};--t:${esc(textColor(color))}" ${data} title="${esc(tip)}">
             ${w >= 75 && label ? `<span>${esc(label)}</span>` : ""}</div>`;
         })
         .join("");
       return `<div class="hs-row ${agenda.enabled ? "" : "paused"}">
         <div class="hs-name" data-select="${esc(agenda.entry_id)}">
-          <span class="dot" style="--c:${agenda.settings.color}"></span>
+          <span class="dot" style="--c:${esc(agenda.settings.color)}"></span>
           <div><b>${esc(agenda.name)}</b><small><ha-icon icon="${liveIcon(agenda)}"></ha-icon><span data-live="${esc(agenda.entry_id)}">${esc(liveText(hass, agenda, T))}</span></small></div>
         </div>
         <div class="hs-track">${segHtml}${isToday ? `<div class="now v" style="left:${pct(now - day)}"></div>` : ""}</div>
@@ -296,7 +359,7 @@ export function renderList(ctx) {
                   : eventLabel(hass, agenda, event, T);
               const name = hasStates(agenda) && event.state ? event.name : "";
               return `<div class="li ${event.enabled === false ? "off" : ""}" data-edit="${esc(event.id)}" data-entry="${esc(agenda.entry_id)}">
-                <span class="sw" style="--c:${color};--t:${textColor(color)}">${esc(main)}</span>
+                <span class="sw" style="--c:${esc(color)};--t:${esc(textColor(color))}">${esc(main)}</span>
                 <div class="li-text">
                   <b>${esc(timeSummary(event, T))}</b>${name ? ` <span class="li-name">${esc(name)}</span>` : ""}
                   <small>${esc(repeatSummary(event, T, hass))}</small>
@@ -313,10 +376,10 @@ export function renderList(ctx) {
         : `<div class="li-empty">${esc(T.no_event)}</div>`;
       const def =
         hasStates(agenda) && agenda.settings.default_state
-          ? `<div class="li-default"><span class="sw" style="--c:${stateColor(hass, agenda, agenda.settings.default_state)};--t:#1f1f1f">${esc(stateLabel(hass, agenda, agenda.settings.default_state, T))}</span><small>${esc(T.default_state)}</small></div>`
+          ? `<div class="li-default"><span class="sw" style="--c:${esc(stateColor(hass, agenda, agenda.settings.default_state))};--t:#1f1f1f">${esc(stateLabel(hass, agenda, agenda.settings.default_state, T))}</span><small>${esc(T.default_state)}</small></div>`
           : "";
       return `<section class="ls">
-        <header><span class="dot" style="--c:${agenda.settings.color}"></span><b>${esc(agenda.name)}</b>${def}</header>
+        <header><span class="dot" style="--c:${esc(agenda.settings.color)}"></span><b>${esc(agenda.name)}</b>${def}</header>
         ${rows}
       </section>`;
     })
@@ -374,6 +437,23 @@ export const VIEW_STYLES = `
     background: color-mix(in srgb, var(--c) 16%, transparent); border: 1px dashed color-mix(in srgb, var(--c) 55%, transparent);
     pointer-events: none; }
   .gap span { display: block; padding: 3px 6px; font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--c) 60%, var(--primary-text-color)); }
+  .ghost { position: absolute; left: 2px; right: 2px; z-index: 1; box-sizing: border-box; border-radius: 6px; padding: 3px 6px; overflow: hidden;
+    border: 1px dashed color-mix(in srgb, var(--c) 70%, transparent); cursor: pointer;
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 20%, transparent) 0 5px, transparent 5px 10px);
+    color: color-mix(in srgb, var(--c) 55%, var(--primary-text-color)); }
+  .ghost:hover { background-color: color-mix(in srgb, var(--c) 10%, transparent); }
+  .ghost .ev-main { font-size: 13px; font-weight: 600; text-decoration: line-through; }
+  .ev-cond { display: flex; flex-wrap: wrap; gap: 3px 4px; margin-top: 4px; font-size: 11px; font-weight: 700; line-height: 1.4; }
+  .ev-cond span { display: inline-flex; align-items: center; gap: 1px; white-space: nowrap; padding: 0 7px 0 3px; border-radius: 99px;
+    background: color-mix(in srgb, currentColor 15%, transparent); max-width: 100%; box-sizing: border-box; }
+  .ev-cond em { font-style: normal; overflow: hidden; text-overflow: ellipsis; }
+  .ev-cond span { border: 2px solid transparent; }
+  .ev-cond span.hit { border-color: var(--k); }
+  .ev .ev-cond ha-icon, .ghost .ev-cond ha-icon { --mdc-icon-size: 13px; position: static; opacity: 1; }
+  .ghost.short { display: flex; align-items: center; padding-top: 0; padding-bottom: 0; }
+  .ghost.short .ev-main { font-size: 12px; }
+  .ghost.cont { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: none; }
+  .ghost.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: none; }
   .now { position: absolute; left: -1px; right: 0; height: 2px; background: var(--agenda-now); z-index: 30; pointer-events: none; }
   .now::before { content: ""; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--agenda-now); }
   .now.v { top: 0; bottom: 0; width: 2px; height: auto; left: auto; }

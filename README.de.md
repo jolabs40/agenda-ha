@@ -29,9 +29,15 @@ auf Deutsch eingestellt ist.
     verschoben und durch Ziehen am unteren Rand verlängert. Bei einem wiederholten Termin wählt man
     zwischen nur diesem Tag und der ganzen Serie. Auf einem Touchscreen hebt ein langes Drücken den
     Block an. Ein Tag lässt sich auf andere Tage der Woche kopieren.
+    Ein Block nennt die Kalender, von denen sein Termin abhängt, und umrandet den, der ihn an diesem
+    Tag auslöst; Tage, die ein Kalender aus einer Serie nimmt, erscheinen schraffiert.
   - Monat: die Termine jedes Tages, mit Feiertagen und Schulferien.
   - Haus: alle Agenden über einen Tag, mit dem, was jedes Gerät gerade tut.
   - Liste: alle Termine und ihre Wiederholung.
+- Auf einem breiten Bildschirm stehen die Agenden in einer Spalte, wie im Kalender-Panel: die
+  anzuzeigenden ankreuzen, sehen, was jede gerade tut und wann sie wechselt, sie pausieren oder ihre
+  Einstellungen öffnen. Auf dem Telefon erledigen das Chips oben. Der Knopf Termin hinzufügen sitzt
+  unten rechts.
 - Wiederholung alle N Tage, Wochen (an gewählten Wochentagen, oder nur in geraden oder ungeraden
   Wochen) oder Monate (am gleichen Datum, am 2. Montag, am letzten Freitag...), auf Wunsch bis zu
   einem Datum. Einzelne Tage lassen sich aus einer Serie entfernen oder hinzufügen.
@@ -43,6 +49,8 @@ auf Deutsch eingestellt ist.
 - Kalender können als Bedingung dienen: Tage mit einem Termin darin überspringen (Reisen,
   Abwesenheiten), nur diese Tage behalten oder beides beim selben Termin. Bei mehreren Kalendern
   genügt ein Termin in einem davon, oder es braucht einen in jedem.
+  Die Feiertage können einer dieser Kalender sein, für einen Termin, der an Homeoffice-Tagen oder
+  an Feiertagen läuft.
 - Ein Kalender der Schulferien wird einmal für alle Agenden gewählt. Jeder wiederholte Termin gilt
   dann immer, nur in der Schulzeit oder nur in den Schulferien, und die Wochenansicht markiert die
   Ferien.
@@ -53,7 +61,8 @@ auf Deutsch eingestellt ist.
   die Agenda pausiert, die Sensoren Jetzt und Nächste Änderung.
 - Aktionen für Automatisierungen und Sprachassistenten: den nächsten Termin überspringen, Daten
   hinzufügen oder entfernen, den Abwesenheitsmodus starten oder beenden.
-- Benutzer ohne Administratorrechte können Termine bearbeiten dürfen.
+- Benutzer ohne Administratorrechte können Termine bearbeiten dürfen; Start- und Endaktionen
+  bleiben den Administratoren vorbehalten.
 - Nach einem Neustart werden die verknüpften Geräte in den Zustand gebracht, den die Agenda
   vorsieht (pro Agenda abschaltbar).
 - Eine Dashboard-Karte, `custom:agenda-card`.
@@ -88,8 +97,8 @@ in einen Ordner `custom_components/agenda` der Konfiguration entpacken (oder die
 Repository kopieren) und Home Assistant neu starten.
 
 Danach die Integration Agenda unter Einstellungen > Geräte & Dienste hinzufügen. Jeder Eintrag ist
-eine Agenda; weitere lassen sich im Panel mit dem Knopf + anlegen. Alles andere wird im Agenda-Panel
-eingestellt.
+eine Agenda; weitere lassen sich im Panel mit dem Knopf Neue Agenda anlegen. Alles andere wird im
+Agenda-Panel eingestellt.
 
 Erfordert Home Assistant 2024.7 oder neuer. Das Paket `holidays` wird automatisch installiert. Das
 Symbol der Integration erscheint ab Home Assistant 2026.3.
@@ -123,6 +132,9 @@ Aktionen funktionieren wie in Automatisierungen, mit drei zusätzlichen Variable
   data:
     message: "{{ event.name }} ({{ agenda }}) {{ 'beginnt' if phase == 'start' else 'endet' }}"
 ```
+
+Nur Administratoren legen Aktionen fest. Benutzer, die Termine bearbeiten dürfen, sehen sie nicht,
+und ihre Änderungen behalten die vorhandenen Aktionen.
 
 ## Sonnenaufgang, Sonnenuntergang und Bedingungen
 
@@ -168,6 +180,11 @@ Programm zurück.
 Sie folgen dem Land, das unter Einstellungen > System > Allgemein eingestellt ist. Ein anderes Land
 oder eine Region (ein Bundesland, ein Kanton, ein US-Bundesstaat...) lässt sich in den
 Einstellungen jeder Agenda wählen und gilt für alle.
+
+In den Ausnahmen eines Termins steht Feiertage auch ganz oben in den Kalenderlisten. Die
+Einstellung Feiertage schränkt die Tage immer ein, eine Liste dagegen verbindet ihre Kalender: mit
+Homeoffice und Feiertage unter Nur an Tagen mit einem Termin (in mindestens einem davon, die
+Vorgabe) läuft der Termin an Homeoffice-Tagen wie an Feiertagen.
 
 ## Schulferien
 

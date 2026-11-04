@@ -20,7 +20,7 @@ Event shape (missing fields take their default value):
         "exclude": ["2026-11-11"],    # days without an occurrence
         "include": ["2026-12-24"],    # days added on top of the rule
         "holidays": "ignore" | "exclude" | "only",
-        "calendars": ["calendar.trips"],  # condition calendars, none by default
+        "calendars": ["calendar.trips"],  # condition calendars, none by default; "holidays" = public holidays
         "calendar_mode": "exclude" | "only",
         "calendar_match": "any" | "all",  # busy in one of them, or in all of them
         "except_calendars": ["calendar.leave"],  # with calendar_mode "only": but not these days
@@ -61,6 +61,8 @@ CALENDAR_MODES = (CALENDAR_EXCLUDE, CALENDAR_ONLY)
 CALENDAR_ANY = "any"
 CALENDAR_ALL = "all"
 CALENDAR_MATCHES = (CALENDAR_ANY, CALENDAR_ALL)
+# in a list of condition calendars, the public holidays: "a calendar's days or a holiday"
+HOLIDAYS_CALENDAR = "holidays"
 
 PERIOD_ALWAYS = "always"
 PERIOD_SCHOOL = "school"
@@ -239,25 +241,21 @@ def wall_bounds(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> 
 
 def _busy(day: date, ctx: Context, calendars: Iterable[str], match: str) -> bool:
     """Whether the day has an event in one of the calendars, or in each of them."""
-    busy = [day in ctx.calendar_days.get(calendar, ()) for calendar in calendars]
+    busy = [
+        ctx.is_holiday(day) if calendar == HOLIDAYS_CALENDAR else day in ctx.calendar_days.get(calendar, ())
+        for calendar in calendars
+    ]
     return all(busy) if match == CALENDAR_ALL else any(busy)
 
 
-def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bool:
-    """Whether an occurrence of the event starts on this day."""
+def _by_rule(event: dict[str, Any], day: date, ctx: Context) -> bool:
+    """Whether the repetition places the event on this day, before the calendar conditions."""
     repeat = event.get("repeat") or {}
     first = parse_point(event["start"]).date()
-    iso = day.isoformat()
-
-    if iso in (repeat.get("exclude") or ()):
-        return False
-    # explicitly added days bypass the rule and its conditions
-    if iso in (repeat.get("include") or ()):
-        return True
     if day < first:
         return False
     until = repeat.get("until")
-    if until and iso > until:
+    if until and day.isoformat() > until:
         return False
 
     freq = repeat.get("freq", FREQ_NONE)
@@ -289,15 +287,6 @@ def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bo
     if holidays == HOLIDAYS_ONLY and not ctx.is_holiday(day):
         return False
 
-    calendars = repeat.get("calendars")
-    if calendars:
-        hit = _busy(day, ctx, calendars, repeat.get("calendar_match", CALENDAR_ANY))
-        if hit != (repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY):
-            return False
-    excluded = repeat.get("except_calendars")
-    if excluded and _busy(day, ctx, excluded, repeat.get("except_match", CALENDAR_ANY)):
-        return False
-
     period = repeat.get("period", PERIOD_ALWAYS)
     if period != PERIOD_ALWAYS:
         # without a school calendar no day is known as a school holiday
@@ -307,14 +296,62 @@ def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bo
     return True
 
 
-def occurrences(
-    event: dict[str, Any],
-    tz: tzinfo,
-    start: datetime,
-    end: datetime,
-    ctx: Context = NO_CONTEXT,
-) -> list[Occurrence]:
-    """Occurrences of the event overlapping [start, end) (aware bounds)."""
+def _calendar_skip(repeat: dict[str, Any], day: date, ctx: Context) -> str | None:
+    """The calendar list that leaves the day out: CALENDAR_ONLY, CALENDAR_EXCLUDE, or None."""
+    calendars = repeat.get("calendars")
+    if calendars:
+        only = repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY
+        if _busy(day, ctx, calendars, repeat.get("calendar_match", CALENDAR_ANY)) != only:
+            return CALENDAR_ONLY if only else CALENDAR_EXCLUDE
+    excluded = repeat.get("except_calendars")
+    if excluded and _busy(day, ctx, excluded, repeat.get("except_match", CALENDAR_ANY)):
+        return CALENDAR_EXCLUDE
+    return None
+
+
+def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bool:
+    """Whether an occurrence of the event starts on this day."""
+    repeat = event.get("repeat") or {}
+    iso = day.isoformat()
+    if iso in (repeat.get("exclude") or ()):
+        return False
+    # explicitly added days bypass the rule and its conditions
+    if iso in (repeat.get("include") or ()):
+        return True
+    if not _by_rule(event, day, ctx):
+        return False
+    return repeat.get("freq", FREQ_NONE) == FREQ_NONE or _calendar_skip(repeat, day, ctx) is None
+
+
+def busy_calendars(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> list[str]:
+    """The condition calendars of the event with something on this day, holidays included."""
+    repeat = event.get("repeat") or {}
+    return [
+        calendar
+        for key in ("calendars", "except_calendars")
+        for calendar in repeat.get(key) or ()
+        if _busy(day, ctx, (calendar,), CALENDAR_ANY)
+    ]
+
+
+def skipped_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> str | None:
+    """The calendar list that removes a day the repetition falls on, as in _calendar_skip.
+
+    Holidays and school periods are left aside: the week already shows them.
+    """
+    repeat = event.get("repeat") or {}
+    iso = day.isoformat()
+    if repeat.get("freq", FREQ_NONE) == FREQ_NONE or iso in (repeat.get("exclude") or ()):
+        return None
+    if iso in (repeat.get("include") or ()) or not _by_rule(event, day, ctx):
+        return None
+    return _calendar_skip(repeat, day, ctx)
+
+
+def _placed(
+    event: dict[str, Any], tz: tzinfo, start: datetime, end: datetime, ctx: Context, test: Callable[[date], Any]
+) -> list[tuple[Occurrence, Any]]:
+    """Occurrences overlapping [start, end) on the days where test(day) is true, with that value."""
     if not event.get("enabled", True):
         return []
     _, duration = bounds(event)
@@ -325,23 +362,38 @@ def occurrences(
     margin = 2 * ONE_DAY if event.get("start_sun") or event.get("end_sun") else ONE_DAY
     day = (local_start - duration).date() - margin
     last = local_end.date()
-    found: list[Occurrence] = []
+    found: list[tuple[Occurrence, Any]] = []
     while day <= last:
-        if starts_on(event, day, ctx) and (wall := wall_bounds(event, day, ctx)) is not None:
+        if (value := test(day)) and (wall := wall_bounds(event, day, ctx)) is not None:
             occ_start = wall[0].replace(tzinfo=tz).astimezone(UTC)
             occ_end = wall[1].replace(tzinfo=tz).astimezone(UTC)
             if occ_end > start and occ_start < end:
-                found.append(
-                    Occurrence(
-                        event_id=event["id"],
-                        day=day,
-                        start=occ_start,
-                        end=occ_end,
-                        all_day=bool(event.get("all_day")),
-                    )
-                )
+                occ = Occurrence(event["id"], day, occ_start, occ_end, bool(event.get("all_day")))
+                found.append((occ, value))
         day += ONE_DAY
     return found
+
+
+def occurrences(
+    event: dict[str, Any],
+    tz: tzinfo,
+    start: datetime,
+    end: datetime,
+    ctx: Context = NO_CONTEXT,
+) -> list[Occurrence]:
+    """Occurrences of the event overlapping [start, end) (aware bounds)."""
+    return [occ for occ, _ in _placed(event, tz, start, end, ctx, lambda day: starts_on(event, day, ctx))]
+
+
+def skipped(
+    event: dict[str, Any],
+    tz: tzinfo,
+    start: datetime,
+    end: datetime,
+    ctx: Context = NO_CONTEXT,
+) -> list[tuple[Occurrence, str]]:
+    """Occurrences a calendar condition removes, with the list responsible (see skipped_on)."""
+    return _placed(event, tz, start, end, ctx, lambda day: skipped_on(event, day, ctx))
 
 
 def all_occurrences(

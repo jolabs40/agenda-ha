@@ -24,6 +24,13 @@ export function friendlyName(hass, entityId) {
   return hass?.states?.[entityId]?.attributes?.friendly_name || entityId;
 }
 
+// in a list of condition calendars, the public holidays
+export const HOLIDAYS = "holidays";
+
+export function calendarName(hass, id, T) {
+  return id === HOLIDAYS ? T.holidays : friendlyName(hass, id);
+}
+
 export const DAY = 1440;
 
 export function wm(text) {
@@ -222,7 +229,7 @@ export function repeatSummary(event, T, hass) {
   if (r.holidays === "exclude") extra.push(T.except_holidays);
   if (r.holidays === "only") extra.push(T.only_holidays);
   const calendarList = (ids, match) => {
-    const names = ids.map((id) => friendlyName(hass, id));
+    const names = ids.map((id) => calendarName(hass, id, T));
     const last = names.pop();
     const word = match === "all" ? T.list_and : T.list_or;
     return names.length ? `${names.join(", ")} ${word} ${last}` : last;
