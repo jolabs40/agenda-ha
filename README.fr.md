@@ -85,9 +85,11 @@ Thermostat), elle s'affiche à côté du nom du mode.
 
 ## Installation
 
-Avec HACS, utiliser le bouton ci-dessus, ou ouvrir HACS, son menu, Dépôts personnalisés, et
-ajouter `https://github.com/jolabs40/agenda-ha` avec le type Intégration. Télécharger Agenda,
-puis redémarrer Home Assistant.
+Dans HACS, chercher Agenda (ou utiliser le bouton ci-dessus), le télécharger, puis redémarrer Home
+Assistant.
+
+S'il n'apparaît pas encore, l'ajouter en dépôt personnalisé : ouvrir HACS, son menu, Dépôts
+personnalisés, et ajouter `https://github.com/jolabs40/agenda-ha` avec le type Intégration.
 
 Sans HACS, décompresser `agenda.zip`, joint à la [dernière version](https://github.com/jolabs40/agenda-ha/releases/latest),
 dans un dossier `custom_components/agenda` de la configuration (ou copier ce dossier depuis le

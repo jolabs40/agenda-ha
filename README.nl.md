@@ -89,9 +89,10 @@ naast de naam van de modus.
 
 ## Installatie
 
-Met HACS de knop hierboven gebruiken, of in HACS het menu openen, Aangepaste repositories kiezen en
-`https://github.com/jolabs40/agenda-ha` toevoegen met het type Integratie. Agenda downloaden en
-Home Assistant herstarten.
+Zoek Agenda in HACS (of gebruik de knop hierboven), download het en herstart Home Assistant.
+
+Verschijnt het nog niet, voeg het dan toe als aangepaste repository: open in HACS het menu, kies
+Aangepaste repositories en voeg `https://github.com/jolabs40/agenda-ha` toe met het type Integratie.
 
 Zonder HACS `agenda.zip` van de [nieuwste versie](https://github.com/jolabs40/agenda-ha/releases/latest)
 uitpakken in een map `custom_components/agenda` van je configuratie (of die map uit de repository

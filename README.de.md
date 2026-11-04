@@ -88,9 +88,12 @@ erscheinen sie neben den Namen der Modi.
 
 ## Installation
 
-Mit HACS den Knopf oben verwenden, oder in HACS das Menü öffnen, Benutzerdefinierte Repositories
-wählen und `https://github.com/jolabs40/agenda-ha` mit dem Typ Integration hinzufügen. Agenda
-herunterladen und Home Assistant neu starten.
+In HACS nach Agenda suchen (oder den Knopf oben verwenden), herunterladen und Home Assistant neu
+starten.
+
+Taucht es noch nicht auf, als benutzerdefiniertes Repository hinzufügen: in HACS das Menü öffnen,
+Benutzerdefinierte Repositories wählen und `https://github.com/jolabs40/agenda-ha` mit dem Typ
+Integration hinzufügen.
 
 Ohne HACS `agenda.zip` aus der [neuesten Version](https://github.com/jolabs40/agenda-ha/releases/latest)
 in einen Ordner `custom_components/agenda` der Konfiguration entpacken (oder diesen Ordner aus dem

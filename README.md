@@ -80,9 +80,10 @@ to the preset names.
 
 ## Installation
 
-With HACS, use the button above, or go to HACS, open the menu, choose Custom repositories and add
-`https://github.com/jolabs40/agenda-ha` with the Integration type. Download Agenda and restart
-Home Assistant.
+In HACS, search for Agenda (or use the button above), download it and restart Home Assistant.
+
+If it does not show up yet, add it as a custom repository: in HACS, open the menu, choose Custom
+repositories and add `https://github.com/jolabs40/agenda-ha` with the Integration type.
 
 Without HACS, unzip `agenda.zip` from the [latest release](https://github.com/jolabs40/agenda-ha/releases/latest)
 into a `custom_components/agenda` folder of your configuration (or copy that folder from this
