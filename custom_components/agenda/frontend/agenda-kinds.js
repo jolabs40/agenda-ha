@@ -51,6 +51,11 @@ export function liveIcon(agenda) {
   return LIVE_ICONS[kindOf(agenda)] || "mdi:information-outline";
 }
 
+export function kindIcon(agenda) {
+  if (kindOf(agenda) === "on_off" && onlyLights(agenda)) return "mdi:lightbulb-outline";
+  return KIND_ICONS[kindOf(agenda)] || KIND_ICONS.none;
+}
+
 const TEMP_STOPS = [
   [7, "#b0bec5"],
   [15, "#64b5f6"],
@@ -67,7 +72,58 @@ const TEMP_STOPS = [
 ];
 export const tempColor = (t) => gradient(TEMP_STOPS, t);
 
+// setpoints are in Home Assistant's unit; the colours above are in Celsius
+const fahrenheit = (hass) => hass?.config?.unit_system?.temperature === "°F";
+const tempUnit = (hass) => hass?.config?.unit_system?.temperature || "°C";
+const setpointColor = (hass, t) => tempColor(fahrenheit(hass) ? ((t - 32) * 5) / 9 : t);
+/** Steps, slider and first value of a setpoint. */
+const tempScale = (hass) =>
+  fahrenheit(hass)
+    ? { min: 41, max: 86, step: 1, slider: [45, 77], first: 68 }
+    : { min: 5, max: 30, step: 0.5, slider: [7, 25], first: 20 };
+
 const PRESET_COLORS = { comfort: "#ffb74d", eco: "#4dd0e1", frost: "#b0bec5", boost: "#e57373", away: "#90a4ae" };
+
+const MODE_ORDER = ["heat", "cool", "heat_cool", "auto", "dry", "fan_only"];
+const MODE_COLORS = {
+  heat: "#ffb74d",
+  cool: "#4fc3f7",
+  heat_cool: "#81c784",
+  auto: "#81c784",
+  dry: "#4db6ac",
+  fan_only: "#b0bec5",
+};
+// optional settings of a climate state: key, attribute listing the values, text
+const CLIMATE_SETTINGS = [
+  ["fan_mode", "fan_modes", "fan_speed"],
+  ["swing_mode", "swing_modes", "swing"],
+  ["swing_horizontal_mode", "swing_horizontal_modes", "swing_h"],
+];
+const CLIMATE_KEYS = ["hvac_mode", ...CLIMATE_SETTINGS.map(([key]) => key)];
+const SETTING_COLOR = "#90caf9";
+const KEEP_COLOR = "#cfd8dc";
+
+const modeName = (T, mode) => T.hvac_modes?.[mode] || mode;
+/** Mode, fan and swing chosen in a climate state, to carry over to another type. */
+const climateExtras = (st) => Object.fromEntries(CLIMATE_KEYS.filter((k) => st?.[k] != null).map((k) => [k, st[k]]));
+
+/** Values every linked device lists in this attribute, in the first one's order. */
+function common(hass, agenda, attr) {
+  let found = null;
+  for (const s of states(hass, agenda)) {
+    const values = s.attributes?.[attr] || [];
+    found = found == null ? [...values] : found.filter((v) => values.includes(v));
+  }
+  return found || [];
+}
+
+/** Modes other than off that every linked thermostat has. */
+export function climateModes(hass, agenda) {
+  const rank = (m) => (MODE_ORDER.indexOf(m) + 99) % 99;
+  return common(hass, agenda, "hvac_modes")
+    .filter((m) => m !== "off")
+    .sort((a, b) => rank(a) - rank(b));
+}
 
 /** Preset temperature, for thermostats exposing preset_temperatures (Versatile Thermostat). */
 export function presetTemp(hass, agenda, preset) {
@@ -137,13 +193,18 @@ function canPosition(hass, agenda) {
 export function stateLabel(hass, agenda, st, T, withTemp = true) {
   if (!st) return "";
   switch (st.type) {
-    case "temperature":
-      return `${fmtNum(st.temperature, T)}°`;
+    case "temperature": {
+      const text = `${fmtNum(st.temperature, T)}°`;
+      return st.hvac_mode ? `${modeName(T, st.hvac_mode)} ${text}` : text;
+    }
     case "preset": {
       const name = T.presets[st.preset] || st.preset;
       const t = withTemp ? presetTemp(hass, agenda, st.preset) : null;
-      return t != null ? `${name} ${fmtNum(t, T)}°` : name;
+      const text = t != null ? `${name} ${fmtNum(t, T)}°` : name;
+      return st.hvac_mode ? `${modeName(T, st.hvac_mode)} ${text}` : text;
     }
+    case "mode":
+      return modeName(T, st.hvac_mode);
     case "off":
       return kindOf(agenda) === "on_off" && onlyLights(agenda) ? T.light_off : T.off;
     case "on": {
@@ -171,11 +232,13 @@ export function stateColor(hass, agenda, st) {
     case "off":
       return OFF_COLOR;
     case "temperature":
-      return tempColor(st.temperature);
+      return setpointColor(hass, st.temperature);
     case "preset": {
       const t = presetTemp(hass, agenda, st.preset);
-      return t != null ? tempColor(t) : PRESET_COLORS[st.preset] || "#90a4ae";
+      return t != null ? setpointColor(hass, t) : PRESET_COLORS[st.preset] || "#90a4ae";
     }
+    case "mode":
+      return MODE_COLORS[st.hvac_mode] || "#90a4ae";
     case "on":
       return st.brightness != null ? mix("#fff3c4", "#ffb300", st.brightness / 100) : "#ffc107";
     case "position":
@@ -203,7 +266,7 @@ export function eventLabel(hass, agenda, event, T) {
 export function draftState(hass, agenda) {
   switch (kindOf(agenda)) {
     case "climate":
-      return { type: "temperature", temperature: 20 };
+      return { type: "temperature", temperature: tempScale(hass).first };
     case "on_off":
       return { type: "on", brightness: null };
     case "cover":
@@ -234,7 +297,11 @@ export function liveText(hass, agenda, T) {
       if (typeof a.current_temperature === "number")
         parts.push(`${fmtNum(Math.round(a.current_temperature * 10) / 10, T)}°`);
       if (first.state === "off") parts.push(T.off.toLowerCase());
-      else if (typeof a.temperature === "number") parts.push(`→ ${fmtNum(a.temperature, T)}°`);
+      else {
+        // the mode only matters on a device that has several
+        if ((a.hvac_modes || []).length > 2) parts.push(modeName(T, first.state).toLowerCase());
+        if (typeof a.temperature === "number") parts.push(`→ ${fmtNum(a.temperature, T)}°`);
+      }
       return parts.join(" ");
     }
     case "on_off": {
@@ -275,6 +342,32 @@ function bigValue({ value, text, color, min, max, step, minus = "-", plus = "+" 
   </div>`;
 }
 
+/** Mode, fan and swing chips of a climate state that is not off. */
+function climateRows(hass, agenda, st, T, modes, settings) {
+  const first = states(hass, agenda)[0];
+  const value = (key, v) => {
+    const shown = first && hass.formatEntityAttributeValue?.(first, key, v);
+    if (shown && shown !== v) return shown;
+    // untranslated values such as 1_up
+    const text = String(v).replace(/_/g, " ");
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  };
+  const row = (title, body) => `<div class="srow"><span>${esc(title)}</span><div class="chips">${body}</div></div>`;
+  let html = "";
+  if (modes.length > 1) {
+    // a mode without setpoint must name its mode
+    let body = st.type === "mode" ? "" : chip("hvac:", T.own_mode, KEEP_COLOR, !st.hvac_mode);
+    for (const m of modes) body += chip(`hvac:${m}`, modeName(T, m), MODE_COLORS[m] || "#90a4ae", st.hvac_mode === m);
+    html += row(T.hvac_mode, body);
+  }
+  for (const [key, values, text] of settings) {
+    let body = chip(`${key}:`, T.unchanged, KEEP_COLOR, st[key] == null);
+    for (const v of values) body += chip(`${key}:${v}`, value(key, v), SETTING_COLOR, st[key] === v);
+    html += row(T[text], body);
+  }
+  return html;
+}
+
 /** State chips, plus a fine-tuning control for the selected state. */
 export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
   const kind = kindOf(agenda);
@@ -282,8 +375,15 @@ export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
   let extra = "";
   if (kind === "climate") {
     const isTemp = st?.type === "temperature";
-    const temp = isTemp ? st.temperature : 20;
-    html += chip("temperature", isTemp ? `${fmtNum(temp, T)}°` : T.temperature, tempColor(temp), isTemp);
+    const scale = tempScale(hass);
+    const temp = isTemp ? st.temperature : scale.first;
+    const modes = climateModes(hass, agenda);
+    const settings = CLIMATE_SETTINGS.map(([key, attr, text]) => [key, common(hass, agenda, attr), text]).filter(
+      ([, values]) => values.length,
+    );
+    // air conditioners and the like; a heating-only thermostat keeps the plain picker
+    const rich = modes.length > 1 || settings.length > 0;
+    html += chip("temperature", isTemp ? `${fmtNum(temp, T)}°` : T.temperature, setpointColor(hass, temp), isTemp);
     for (const p of availablePresets(hass, agenda)) {
       const s = { type: "preset", preset: p };
       html += chip(
@@ -293,17 +393,20 @@ export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
         st?.type === "preset" && st.preset === p,
       );
     }
+    if (rich)
+      html += chip("mode", T.no_setpoint, MODE_COLORS[st?.hvac_mode] || MODE_COLORS.fan_only, st?.type === "mode");
     html += chip("off", T.off, OFF_COLOR, st?.type === "off");
     if (isTemp) {
       extra = bigValue({
         value: temp,
-        text: `${esc(fmtNum(temp, T))}<small>°C</small>`,
-        color: tempColor(temp),
-        min: 7,
-        max: 25,
-        step: 0.5,
+        text: `${esc(fmtNum(temp, T))}<small>${esc(tempUnit(hass))}</small>`,
+        color: setpointColor(hass, temp),
+        min: scale.slider[0],
+        max: scale.slider[1],
+        step: scale.step,
       });
     }
+    if (rich && st && st.type !== "off") extra += climateRows(hass, agenda, st, T, modes, settings);
   } else if (kind === "on_off") {
     const on = { type: "on", brightness: st?.type === "on" ? (st.brightness ?? null) : null };
     html += chip(
@@ -392,7 +495,7 @@ export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
 export function bindState(scope, { hass, agenda, T, get, set, rerender }) {
   const kind = kindOf(agenda);
   const range = () => {
-    if (kind === "climate") return { min: 5, max: 30, step: 0.5 };
+    if (kind === "climate") return tempScale(hass);
     if (kind === "on_off") return { min: 1, max: 100, step: 1 };
     if (kind === "cover") return { min: 1, max: 99, step: 1 };
     return numberRange(hass, agenda);
@@ -400,7 +503,7 @@ export function bindState(scope, { hass, agenda, T, get, set, rerender }) {
   const field = { climate: "temperature", on_off: "brightness", cover: "position", number: "value" }[kind];
   const withValue = (v) => {
     const cur = get() || {};
-    if (kind === "climate") return { type: "temperature", temperature: v };
+    if (kind === "climate") return { ...climateExtras(cur), type: "temperature", temperature: v };
     if (kind === "on_off") return { type: "on", brightness: Math.round(v) };
     if (kind === "cover") return { type: "position", position: Math.round(v) };
     return { ...cur, type: "value", value: v };
@@ -410,14 +513,28 @@ export function bindState(scope, { hass, agenda, T, get, set, rerender }) {
     b.addEventListener("click", () => {
       const key = b.dataset.sp;
       const cur = get();
-      if (key === "none") set(null);
+      const setting = CLIMATE_KEYS.find((k) => key.startsWith(`${k === "hvac_mode" ? "hvac" : k}:`));
+      if (setting) {
+        // a chosen mode, fan or swing; the first chip of a row leaves it out
+        const next = { ...cur };
+        const v = key.slice(key.indexOf(":") + 1);
+        if (v) next[setting] = v;
+        else delete next[setting];
+        set(next);
+      } else if (key === "none") set(null);
       else if (key === "off") set({ type: "off" });
       else if (key === "on") set({ type: "on", brightness: cur?.type === "on" ? (cur.brightness ?? null) : null });
       else if (key === "temperature")
-        set({ type: "temperature", temperature: cur?.type === "temperature" ? cur.temperature : 20 });
+        set({
+          ...climateExtras(cur),
+          type: "temperature",
+          temperature: cur?.type === "temperature" ? cur.temperature : tempScale(hass).first,
+        });
+      else if (key === "mode")
+        set({ ...climateExtras(cur), type: "mode", hvac_mode: cur?.hvac_mode || climateModes(hass, agenda)[0] });
       else if (key === "value")
         set({ type: "value", value: cur?.type === "value" ? cur.value : numberRange(hass, agenda).min });
-      else if (key.startsWith("preset:")) set({ type: "preset", preset: key.slice(7) });
+      else if (key.startsWith("preset:")) set({ ...climateExtras(cur), type: "preset", preset: key.slice(7) });
       else if (key.startsWith("pos:")) {
         const p = Number(key.slice(4));
         const keep = p === 50 && cur?.type === "position" && cur.position > 0 && cur.position < 100;

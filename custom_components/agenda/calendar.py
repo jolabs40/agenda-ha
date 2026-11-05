@@ -33,6 +33,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     dates = {vol.Required("event"): cv.string, vol.Required("dates"): vol.All(cv.ensure_list, [cv.date])}
     platform.async_register_entity_service("add_dates", dates, "async_add_dates")
     platform.async_register_entity_service("remove_dates", dates, "async_remove_dates")
+    platform.async_register_entity_service("advance", None, "async_advance")
+    platform.async_register_entity_service("apply_event", {vol.Required("event"): cv.string}, "async_apply_event")
+    platform.async_register_entity_service("resume", None, "async_resume")
 
 
 class AgendaCalendar(AgendaEntity, CalendarEntity):
@@ -83,3 +86,12 @@ class AgendaCalendar(AgendaEntity, CalendarEntity):
 
     async def async_remove_dates(self, event: str, dates: list[date]) -> None:
         await self.agenda.async_change_dates(event, dates, add=False)
+
+    async def async_advance(self) -> None:
+        await self.agenda.async_advance()
+
+    async def async_apply_event(self, event: str) -> None:
+        await self.agenda.async_apply_named(event)
+
+    async def async_resume(self) -> None:
+        await self.agenda.async_resume()

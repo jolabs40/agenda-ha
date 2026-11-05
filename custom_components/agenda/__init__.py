@@ -31,6 +31,7 @@ from .const import (
     SIGNAL_UPDATED,
     STATIC_URL,
 )
+from .control import async_remove_issues
 from .manager import Agenda
 from .shared import Shared
 
@@ -138,6 +139,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the stored events along with the entry."""
+    """Remove the stored events and the repair issues along with the entry."""
     agenda = Agenda(hass, entry, index=0)
     await agenda.async_remove_storage()
+    async_remove_issues(hass, entry.entry_id)

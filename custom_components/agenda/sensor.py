@@ -53,6 +53,9 @@ class AgendaCurrentSensor(AgendaEntity, SensorEntity):
             "state": state,
             "state_event": self.agenda.label(self.agenda.event(occ.event_id)) if occ else None,
             "enabled": self.agenda.enabled,
+            # ahead of the schedule until then, and the devices left alone after a change by hand
+            "override_until": wall(override["until"], tz) if (override := self.agenda.override) else None,
+            "set_by_hand": sorted(e for e in self.agenda.control.holds if self.agenda.control.held(e)),
         }
 
 

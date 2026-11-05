@@ -32,47 +32,67 @@ auf Deutsch eingestellt ist.
     Ein Block nennt die Kalender, von denen sein Termin abhängt, und umrandet den, der ihn an diesem
     Tag auslöst; Tage, die ein Kalender aus einer Serie nimmt, erscheinen schraffiert.
   - Monat: die Termine jedes Tages, mit Feiertagen und Schulferien.
-  - Haus: alle Agenden über einen Tag, mit dem, was jedes Gerät gerade tut.
+  - Haus: alle Agenden über einen Tag, mit dem, was jedes Gerät gerade tut, und bei Thermostaten
+    der gemessenen Temperatur unter dem Sollwert.
   - Liste: alle Termine und ihre Wiederholung.
 - Auf einem breiten Bildschirm stehen die Agenden in einer Spalte, wie im Kalender-Panel: die
   anzuzeigenden ankreuzen, sehen, was jede gerade tut und wann sie wechselt, sie pausieren oder ihre
   Einstellungen öffnen. Auf dem Telefon erledigen das Chips oben. Der Knopf Termin hinzufügen sitzt
   unten rechts.
+- Andere Kalender von Home Assistant (Schulferien, ein Familienkalender...) lassen sich in derselben
+  Spalte ankreuzen und erscheinen schraffiert in Woche, Monat und Haus, nur zur Information.
 - Wiederholung alle N Tage, Wochen (an gewählten Wochentagen, oder nur in geraden oder ungeraden
   Wochen) oder Monate (am gleichen Datum, am 2. Montag, am letzten Freitag...), auf Wunsch bis zu
   einem Datum. Einzelne Tage lassen sich aus einer Serie entfernen oder hinzufügen.
 - Beginn oder Ende eines Termins können dem Sonnenaufgang oder Sonnenuntergang folgen, mit
-  Versatz.
-- Bedingungen auf Entitäten: ein Termin übernimmt nur, solange zum Beispiel jemand zu Hause ist
-  oder ein Fenster geschlossen ist.
+  Versatz, nicht vor oder spätestens zu einer bestimmten Uhrzeit.
+- Bedingungen auf Entitäten: ein Termin übernimmt nur, solange zum Beispiel jemand zu Hause ist,
+  ein Fenster geschlossen ist oder die Außentemperatur unter 5 °C liegt; alle, oder mindestens eine
+  davon.
 - Die Feiertage des eigenen Landes können übersprungen werden oder die einzigen Tage sein.
 - Kalender können als Bedingung dienen: Tage mit einem Termin darin überspringen (Reisen,
   Abwesenheiten), nur diese Tage behalten oder beides beim selben Termin. Bei mehreren Kalendern
   genügt ein Termin in einem davon, oder es braucht einen in jedem.
   Die Feiertage können einer dieser Kalender sein, für einen Termin, der an Homeoffice-Tagen oder
-  an Feiertagen läuft.
+  an Feiertagen läuft. Ein Kalender kann auch nur seine Termine mit einem bestimmten Text zählen,
+  etwa die teuren Tage eines Stromtarif-Kalenders.
 - Ein Kalender der Schulferien wird einmal für alle Agenden gewählt. Jeder wiederholte Termin gilt
   dann immer, nur in der Schulzeit oder nur in den Schulferien, und die Wochenansicht markiert die
   Ferien.
 - Aktionen zu Beginn und am Ende jedes Termins, mit dem gewohnten Aktionseditor von Home Assistant.
+- Änderungen von Hand werden respektiert: ein von Hand eingestelltes Gerät bleibt so bis zum
+  nächsten Wechsel, oder bis zum nächsten Tag, oder wird sofort zurückgesetzt, je nach Agenda. Ein
+  Neustart behält sie.
+- Abweichungen: Zum Nächsten wendet den nächsten Wechsel sofort an, Jetzt anwenden (im
+  Termineditor) wendet einen Termin bis zu seinem Ende an, Zeitplan fortsetzen hebt sie auf.
+- Jedes Gerät wird nachverfolgt. Ist es nicht verfügbar, bekommt es seinen Zustand, sobald es
+  zurück ist; übernimmt es ihn nicht, gibt es einen zweiten Versuch, dann ein Problem unter
+  Reparaturen. Geräte ohne Zustandsrückmeldung (Funk-Rollläden) bekommen ihren Befehl einmal,
+  nacheinander mit einer kurzen Pause.
+- Klimageräte: ein Termin kann Modus, Lüfterstufe und Schwenken zusammen mit der Temperatur
+  einstellen, oder nur einen Modus (nur Lüfter, Entfeuchten).
 - Ein Abwesenheitsmodus für das ganze Haus: die Agenden, die ihm folgen, behalten ihren
-  Abwesenheitszustand bis zu einem Datum oder bis er beendet wird.
+  Abwesenheitszustand bis zu einem Datum oder bis er beendet wird. Die anderen (Lampen) können
+  derweil Anwesenheit simulieren.
 - Pro Agenda: eine `calendar`-Entität (Kalender-Panel, Kalender-Auslöser), ein Schalter Aktiv, der
   die Agenda pausiert, die Sensoren Jetzt und Nächste Änderung.
 - Aktionen für Automatisierungen und Sprachassistenten: den nächsten Termin überspringen, Daten
-  hinzufügen oder entfernen, den Abwesenheitsmodus starten oder beenden.
+  hinzufügen oder entfernen, vom Zeitplan abweichen, den Abwesenheitsmodus starten oder beenden.
+- Das Logbuch nennt die Agenda, die ein Gerät geändert hat, und zwei Ereignisse lassen
+  Automatisierungen reagieren.
 - Benutzer ohne Administratorrechte können Termine bearbeiten dürfen; Start- und Endaktionen
   bleiben den Administratoren vorbehalten.
 - Nach einem Neustart werden die verknüpften Geräte in den Zustand gebracht, den die Agenda
-  vorsieht (pro Agenda abschaltbar).
-- Eine Dashboard-Karte, `custom:agenda-card`.
+  vorsieht (pro Agenda abschaltbar), außer den von Hand eingestellten.
+- Eine Dashboard-Karte, `custom:agenda-card`, mit visuellem Editor.
+- Temperaturen in °C oder °F, wie in Home Assistant eingestellt.
 - Auf Englisch, Französisch, Deutsch und Niederländisch.
 
 Was eine Agenda steuern kann:
 
 | Typ | Entitäten | Zustände |
 |---|---|---|
-| Thermostate | `climate` | Temperatur, Modus, aus |
+| Thermostate | `climate` | Temperatur (mit Modus, Lüfterstufe und Schwenken bei Klimageräten), Voreinstellung, nur Modus, aus |
 | Ein / aus | `switch`, `light`, `input_boolean`, `fan` | ein (mit Helligkeit bei Lampen), aus |
 | Rollläden | `cover` | offen, geschlossen, Position |
 | Auswahl | `select`, `input_select` | eine der Optionen |
@@ -114,11 +134,33 @@ Symbol der Integration erscheint ab Home Assistant 2026.3.
   ganztägiger Wochenend-Termin und ein Nacht-Termin, der um Mitternacht beginnt: die Nacht gewinnt
   bis zu ihrem Ende, dann übernimmt das Wochenende.
 - Bei jedem Wechsel laufen zuerst die Aktionen am Ende, dann wird der Zustand angewendet, dann
-  laufen die Aktionen zu Beginn. Thermostate erhalten ihren Sollwert zu Beginn jedes Termins, eine
-  manuelle Änderung hält also bis zum nächsten Termin. Andere Geräte werden nur angesprochen, wenn
-  ihr Zustand abweicht.
+  laufen die Aktionen zu Beginn. Thermostate erhalten ihren Sollwert zu Beginn jedes Termins.
+  Andere Geräte werden nur angesprochen, wenn ihr Zustand abweicht, außer Geräten ohne
+  Zustandsrückmeldung: was sie anzeigen, ist nur eine Annahme, sie bekommen ihren Befehl also immer.
 - Zeiten sind lokale Uhrzeiten: ein Termin um 21:30 bleibt bei der Zeitumstellung um 21:30.
 - Der Schalter Aktiv pausiert die Agenda vollständig.
+
+## Änderungen von Hand
+
+Ein von Hand eingestelltes Gerät, am Gerät selbst oder in Home Assistant, wird als solches erkannt.
+Die Einstellung Änderungen von Hand jeder Agenda bestimmt, was folgt:
+
+| Auswahl | Was die Agenda tut |
+|---|---|
+| Bis zum nächsten Wechsel behalten (Vorgabe) | lässt es bis zum Beginn oder Ende des nächsten Termins |
+| Bis zum nächsten Tag behalten | lässt es bis Mitternacht |
+| Sofort wieder so, wie die Agenda es will | setzt es nach 5 Sekunden zurück; nach drei Malen in zehn Minuten lässt sie es bis zum nächsten Wechsel |
+| Die Agenda hat immer Vorrang | übergeht es, der nächste Wechsel gilt wie gewohnt |
+
+Ein Neustart behält diese Änderungen, `agenda.resync` ebenso. Jetzt anwenden in den Einstellungen
+holt alle Geräte zurück. Die Spalte zeigt "von Hand eingestellt bis...", und der Sensor Jetzt
+listet diese Geräte im Attribut `set_by_hand`.
+
+Abweichungen ändern den Zeitplan selbst, bis zu der Uhrzeit, die sie anzeigen (`override_until`
+am Sensor Jetzt): Zum Nächsten wendet den Zustand des nächsten Wechsels sofort an (noch einmal:
+den danach), Jetzt anwenden im Termineditor wendet den Zustand dieses Termins bis zum Ende seines
+nächsten Vorkommens an. Zeitplan fortsetzen hebt beide auf und holt die von Hand eingestellten
+Geräte zurück.
 
 ## Aktionen
 
@@ -144,12 +186,16 @@ und ihre Änderungen behalten die vorhandenen Aktionen.
 Die Sonnenzeiten berechnet Home Assistant Tag für Tag für den Standort, der unter Einstellungen >
 System > Allgemein eingestellt ist. Bringt die Sonne das Ende eines Termins vor seinen Beginn
 (Sonnenuntergang nach einem festen Ende um 21:00 im Sommer), findet der Termin an diesem Tag nicht
-statt.
+statt. Nicht vor und Spätestens begrenzen eine Sonnenzeit: Rollläden, die bei Sonnenuntergang
+schließen, aber nicht vor 18:00.
 
 Bedingungen vergleichen den Zustand einer Entität: `person.alex` ist `home`, `binary_sensor.fenster`
-ist nicht `on`. Sie werden zu Beginn des Termins und bei jeder Änderung der Entität gelesen. Ein
-Termin, dessen Bedingungen nicht mehr erfüllt sind, überlässt die Steuerung dem nächsten Termin oder
-dem Standardzustand; seine Aktionen am Ende laufen trotzdem.
+ist nicht `on`, `sensor.aussentemperatur` ist unter `5`. Bei mehreren Bedingungen braucht der
+Termin alle oder mindestens eine davon. Sie werden zu Beginn des Termins und bei jeder Änderung der
+Entität gelesen. Ein Termin, dessen Bedingungen nicht mehr erfüllt sind, überlässt die Steuerung
+dem nächsten Termin oder dem Standardzustand; seine Aktionen am Ende laufen trotzdem. Eine Entität,
+die nicht mehr verfügbar ist, behält ihren letzten Zustand zehn Minuten lang, auch über einen
+Neustart: ein Sensor, der kurz ausfällt, ändert nichts.
 
 ## Abwesenheitsmodus
 
@@ -159,6 +205,11 @@ behält jede Agenda, die ihm folgt (eine Option in ihren Einstellungen), ihren A
 oder sonst ihren Standardzustand und führt keine Aktion aus. Am Ende kehrt jede Agenda zu ihrem
 Programm zurück.
 
+Eine Agenda, die ihm nicht folgt, kann stattdessen Anwesenheit simulieren (Anwesenheitssimulation,
+in ihren Einstellungen): während einer Abwesenheit verschieben sich ihre Beginn- und Endzeiten
+zufällig um bis zu der gewählten Anzahl Minuten, früher oder später, damit die Lampen nicht jeden
+Tag zur selben Zeit angehen.
+
 ## Automatisierungen
 
 | Aktion | Ziel | Daten |
@@ -166,9 +217,12 @@ Programm zurück.
 | `agenda.skip_next` | der Kalender einer Agenda | `event` (Name, optional): entfernt den nächsten Termin |
 | `agenda.add_dates` | der Kalender einer Agenda | `event`, `dates`: fügt an diesen Tagen Termine hinzu |
 | `agenda.remove_dates` | der Kalender einer Agenda | `event`, `dates`: entfernt die Termine an diesen Tagen |
+| `agenda.advance` | der Kalender einer Agenda | wendet den nächsten Wechsel sofort an (Zum Nächsten) |
+| `agenda.apply_event` | der Kalender einer Agenda | `event` (Name): wendet diesen Termin bis zum Ende seines nächsten Vorkommens an |
+| `agenda.resume` | der Kalender einer Agenda | beendet die Abweichung und holt die von Hand eingestellten Geräte zurück |
 | `agenda.set_absence` | | `until` (optional): startet den Abwesenheitsmodus |
 | `agenda.end_absence` | | beendet ihn |
-| `agenda.resync` | der Kalender einer Agenda | bringt die Geräte in den Zustand, den die Agenda jetzt vorsieht |
+| `agenda.resync` | der Kalender einer Agenda | bringt die Geräte in den Zustand, den die Agenda jetzt vorsieht, außer den von Hand eingestellten |
 
 ```yaml
 - action: agenda.skip_next
@@ -177,6 +231,45 @@ Programm zurück.
   data:
     event: Morgen
 ```
+
+Die `calendar`-Entität jeder Agenda funktioniert auch mit dem Kalender-Auslöser von Home
+Assistant, bei Bedarf mit Versatz:
+
+```yaml
+triggers:
+  - trigger: calendar
+    event: start
+    entity_id: calendar.agenda_wohnzimmer
+    offset: "-0:15:00"
+actions:
+  - action: notify.mobile_app_telefon
+    data:
+      message: "{{ trigger.calendar_event.summary }} in 15 Minuten"
+```
+
+## Ereignisse und Logbuch
+
+Jeder Zustand, den ein Gerät bekommt, löst `agenda_state_applied` aus; ein Gerät, das ihn nach
+einem zweiten Versuch noch nicht anzeigt, löst `agenda_state_failed` aus und bekommt ein Problem
+unter Reparaturen. Ihre Daten: `agenda`, `entry_id`, `entity_id`, `state`, `label` (der Zustand,
+wie ihn das Panel zeigt), und bei `agenda_state_applied` der Grund `reason` (`schedule`, `edit`,
+`resync`, `available`, `retry`...) sowie der Termin `event` (`id` und `name`), wenn ein Termin ihn
+bestimmt hat.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: agenda_state_failed
+actions:
+  - action: notify.mobile_app_telefon
+    data:
+      message: "{{ trigger.event.data.entity_id }} hat {{ trigger.event.data.label }} nicht übernommen"
+```
+
+Das Logbuch zeigt für jeden angewendeten Zustand eine Zeile ("von der Agenda Schlafzimmer eingestellt:
+19 °C"), und die Änderungen des Geräts nennen die Agenda als Ursache. Ist das Logbuch auf ein Gerät
+gefiltert, behält Home Assistant nur die Zeilen der Integration dieses Geräts: die Ursache steht
+dort weiterhin, die Zeile der Agenda nur im vollständigen Logbuch.
 
 ## Feiertage
 
@@ -211,9 +304,16 @@ title: Heizung                     # optional
 type: custom:agenda-card
 view: week
 agenda: Schlafzimmer
+hour_height: 32                    # optional
 ```
 
-Ein Klick auf die Karte öffnet das Panel.
+```yaml
+type: custom:agenda-card
+view: next                         # Restzeit, Zustand, nächster Wechsel, Zum Nächsten und Fortsetzen
+agenda: Schlafzimmer
+```
+
+Die Karte hat einen visuellen Editor. Ein Klick darauf öffnet das Panel.
 
 ## Unterstützung
 

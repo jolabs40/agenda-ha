@@ -10,11 +10,13 @@ const {
   calendarName,
   esc,
   fmtDay,
+  offSchedule,
   repeatSummary,
   splitByDay,
   stack,
   textColor,
   timeSummary,
+  wall,
   wallDate,
   wallTime,
   wm,
@@ -65,6 +67,16 @@ export function renderWeek(ctx) {
 
   const holidays = ctx.holidays || {};
   const vacation = ctx.vacation || {};
+  // calendars that are not agendas, for information: all-day events under the date, the
+  // others along the right edge of the column
+  const xHead = Object.fromEntries(dayList.map((d) => [d, []]));
+  const xCol = Object.fromEntries(dayList.map((d) => [d, []]));
+  for (const cal of ctx.external || []) {
+    const split = splitByDay(cal.events, firstDay, days);
+    for (const d of dayList)
+      for (const piece of split[d]) (piece.occ.all_day ? xHead : xCol)[d].push({ ...piece, cal });
+  }
+  const xData = (cal, occ) => `data-xev="${esc(cal.id)}" data-xi="${occ.i}"`;
   const head = dayList
     .map((d, i) => {
       const isToday = d === today;
@@ -77,6 +89,15 @@ export function renderWeek(ctx) {
       let note = "";
       if (holiday) note = `<span class="wk-hol">${esc(holiday)}</span>`;
       else if (vacationStarts) note = `<span class="wk-vac">${esc(school || T.vacation)}</span>`;
+      const xs = xHead[d];
+      const xShown = xs.length > 3 ? xs.slice(0, 2) : xs;
+      note += xShown
+        .map(
+          ({ cal, occ }) =>
+            `<button class="wk-x" ${xData(cal, occ)} style="--c:${esc(cal.color)}" title="${esc([cal.name, occ.summary].filter(Boolean).join(" · "))}">${esc(occ.summary || cal.name)}</button>`,
+        )
+        .join("");
+      if (xs.length > xShown.length) note += `<span class="wk-xmore">+${xs.length - xShown.length}</span>`;
       return `<div class="wk-day ${isToday ? "today" : ""} ${holiday ? "holiday" : ""} ${onVacation ? "vacation" : ""}" ${tip ? `title="${esc(tip)}"` : ""}>
         ${editable && days === 7 ? `<button class="wk-copy" data-copy-day="${d}" title="${esc(T.copy_day)}"><ha-icon icon="mdi:content-copy"></ha-icon></button>` : ""}
         <span class="wk-dname">${esc(fmtDay(d, lang, { weekday: "short" }))}</span>
@@ -123,9 +144,10 @@ export function renderWeek(ctx) {
     const r = event.repeat || {};
     if (!r.freq || r.freq === "none") return [];
     const only = r.calendar_mode === "only";
+    const texts = r.calendar_texts || {};
     return [
-      ...(r.calendars || []).map((id) => [only, id]),
-      ...(only ? r.except_calendars || [] : []).map((id) => [false, id]),
+      ...(r.calendars || []).map((id) => [only, id, texts[id]]),
+      ...(only ? r.except_calendars || [] : []).map((id) => [false, id, texts[id]]),
     ];
   };
   // the calendar with something that day gets its colour around it: what runs or skips the event
@@ -133,15 +155,16 @@ export function renderWeek(ctx) {
     const list = conditions(event);
     if (!list.length) return "";
     const busy = occ.busy || [];
-    const items = list.map(([plus, id]) => {
+    // with a text, the text says it best: - Rouge rather than - RTE Tempo
+    const items = list.map(([plus, id, text]) => {
       const hit = busy.includes(id) ? ` class="hit" style="--k:${esc(colorOf(id))}"` : "";
-      return `<span${hit}><ha-icon icon="mdi:${plus ? "plus" : "minus"}"></ha-icon><em>${esc(nameOf(id))}</em></span>`;
+      return `<span${hit}><ha-icon icon="mdi:${plus ? "plus" : "minus"}"></ha-icon><em>${esc(text || nameOf(id))}</em></span>`;
     });
     return `<div class="ev-cond">${items.join("")}</div>`;
   };
   const condText = (event) =>
     conditions(event)
-      .map(([plus, id]) => `${plus ? "+" : "-"} ${nameOf(id)}`)
+      .map(([plus, id, text]) => `${plus ? "+" : "-"} ${nameOf(id)}${text ? ` (${text})` : ""}`)
       .join(", ");
   const mainLabel = (agenda, event) =>
     hasStates(agenda) && event.state ? stateLabel(hass, agenda, event.state, T) : eventLabel(hass, agenda, event, T);
@@ -202,10 +225,18 @@ export function renderWeek(ctx) {
           ${editable && !occ.all_day && p.last ? `<div class="ev-resize" data-resize="1"></div>` : ""}
         </div>`;
       }
+      for (const p of stack(xCol[d])) {
+        const { cal, occ } = p;
+        const tip = [cal.name, occ.summary, timeOf(occ)].filter(Boolean).join(" · ");
+        html += `<div class="xev ${p.first ? "" : "cont"} ${p.last ? "" : "open"}" ${xData(cal, occ)} title="${esc(tip)}"
+            style="top:${pct(p.from)};height:${pct(p.to - p.from)};right:${2 + Math.min(p.depth, 3) * 5}px;--c:${esc(cal.color)}">
+          <b>${esc(occ.summary || cal.name)}</b></div>`;
+      }
       if (d === today) {
         html += `<div class="now" style="top:${pct(now - d)}"></div>`;
       }
-      return `<div class="wk-col ${d === today ? "today" : ""}" data-col-day="${d}">${html}</div>`;
+      const cls = [d === today ? "today" : "", xCol[d].length ? "has-x" : ""].join(" ");
+      return `<div class="wk-col ${cls}" data-col-day="${d}">${html}</div>`;
     })
     .join("");
 
@@ -244,6 +275,14 @@ export function renderMonth(ctx) {
       }
     }
   }
+  for (const cal of ctx.external || []) {
+    for (const [d, pieces] of Object.entries(splitByDay(cal.events, firstDay, days))) {
+      // a calendar of several days, such as school holidays, is shown on each of them
+      for (const piece of pieces)
+        if (piece.first || piece.occ.all_day || Number(d) === firstDay)
+          (perDay[d] ||= []).push({ cal, occ: piece.occ });
+    }
+  }
 
   const head = Array.from(
     { length: 7 },
@@ -255,7 +294,12 @@ export function renderMonth(ctx) {
     const items = (perDay[d] || []).sort((a, b) => wm(a.occ.start) - wm(b.occ.start));
     const shown = items.length > 4 ? items.slice(0, 3) : items;
     const chips = shown
-      .map(({ agenda, event, occ }) => {
+      .map(({ agenda, event, occ, cal }) => {
+        if (cal) {
+          const time = occ.all_day ? "" : wallTime(wm(occ.start));
+          return `<div class="mo-ev mo-x" data-xev="${esc(cal.id)}" data-xi="${occ.i}" style="--c:${esc(cal.color)}" title="${esc([cal.name, occ.summary, time].filter(Boolean).join(" · "))}">
+            ${time ? `<b>${time}</b>` : ""}<span>${esc(occ.summary || cal.name)}</span></div>`;
+        }
         const color = eventColor(hass, agenda, event);
         const label =
           hasStates(agenda) && event.state
@@ -282,13 +326,62 @@ export function renderMonth(ctx) {
   return `<div class="mo" style="--weeks:${weeks}"><div class="mo-head">${head}</div><div class="mo-grid">${cells}</div></div>`;
 }
 
-/** ctx: { hass, T, agendas, occ, day, now } */
+/** The day's measured temperature (line) and the device's own setpoint (dashed steps) of a
+ *  thermostat agenda, over its track. points: [[wall minute, measured, setpoint], ...]. */
+function climateCurve(points, day, until) {
+  const values = points.flatMap(([, c, t]) => [c, t]).filter((v) => typeof v === "number");
+  if (!values.length) return "";
+  let lo = Math.min(...values);
+  let hi = Math.max(...values);
+  if (hi - lo < 2) {
+    const mid = (hi + lo) / 2;
+    lo = mid - 1;
+    hi = mid + 1;
+  }
+  const x = (m) => Math.max(0, Math.min(DAY, m - day));
+  const y = (v) => (88 - ((v - lo) / (hi - lo)) * 76).toFixed(1);
+  const measured = [];
+  let last = null;
+  let steps = "";
+  let set = null;
+  let since = null;
+  for (const [m, c, t] of points) {
+    if (m > until) break;
+    if (typeof c === "number") {
+      measured.push(`${x(m)},${y(c)}`);
+      last = c;
+    }
+    const target = typeof t === "number" ? t : null;
+    if (target !== set) {
+      if (set !== null) steps += `M${x(since)},${y(set)}H${x(m)}`;
+      set = target;
+      since = m;
+    }
+  }
+  if (last !== null) measured.push(`${x(until)},${y(last)}`);
+  if (set !== null) steps += `M${x(since)},${y(set)}H${x(until)}`;
+  const line = measured.length > 1 ? measured.join(" ") : "";
+  return `<svg class="hs-curve" viewBox="0 0 ${DAY} 100" preserveAspectRatio="none" aria-hidden="true">
+    ${steps ? `<path class="halo" d="${steps}"/><path class="tgt" d="${steps}"/>` : ""}
+    ${line ? `<polyline class="halo" points="${line}"/><polyline class="cur" points="${line}"/>` : ""}</svg>`;
+}
+
+/** ctx: { hass, T, agendas, occ, day, now, history } */
 export function renderHouse(ctx) {
   const { hass, T, agendas, day, now } = ctx;
   const ticks = [0, 3, 6, 9, 12, 15, 18, 21, 24]
     .map((h) => `<span style="left:${pct(h * 60)}">${String(h).padStart(2, "0")}h</span>`)
     .join("");
   const isToday = dayOf(now) === day;
+  // the history ends now on today, at midnight on a day gone by
+  const until = isToday ? now : day + DAY;
+  let curves = 0;
+  const curveOf = (agenda) => {
+    const points = agenda.settings.kind === "climate" && ctx.history?.[(agenda.settings.entities || [])[0]];
+    const svg = points?.length && day <= now ? climateCurve(points, day, until) : "";
+    if (svg) curves += 1;
+    return svg;
+  };
 
   const rows = agendas
     .map((agenda) => {
@@ -328,15 +421,80 @@ export function renderHouse(ctx) {
           <span class="dot" style="--c:${esc(agenda.settings.color)}"></span>
           <div><b>${esc(agenda.name)}</b><small><ha-icon icon="${liveIcon(agenda)}"></ha-icon><span data-live="${esc(agenda.entry_id)}">${esc(liveText(hass, agenda, T))}</span></small></div>
         </div>
-        <div class="hs-track">${segHtml}${isToday ? `<div class="now v" style="left:${pct(now - day)}"></div>` : ""}</div>
+        <div class="hs-track">${segHtml}${curveOf(agenda)}</div>
       </div>`;
     })
     .join("");
 
+  const xRows = (ctx.external || [])
+    .map((cal) => {
+      const segs = (splitByDay(cal.events, day, 1)[day] || [])
+        .map(({ occ, from, to }) => {
+          const w = to - from;
+          const tip = [occ.all_day ? "" : `${hhmm(from)}–${hhmm(to)}`, occ.summary].filter(Boolean).join(" · ");
+          return `<div class="seg xseg" style="left:${pct(from)};width:${pct(w)};--c:${esc(cal.color)}" data-xev="${esc(cal.id)}" data-xi="${occ.i}" title="${esc(tip)}">
+            ${w >= 75 && occ.summary ? `<span>${esc(occ.summary)}</span>` : ""}</div>`;
+        })
+        .join("");
+      return `<div class="hs-row xrow">
+        <div class="hs-name"><span class="dot" style="--c:${esc(cal.color)}"></span>
+          <div><b>${esc(cal.name)}</b><small><ha-icon icon="mdi:calendar-outline"></ha-icon><span>${esc(T.for_information)}</span></small></div></div>
+        <div class="hs-track x">${segs}</div>
+      </div>`;
+    })
+    .join("");
+
+  // one line across every room, its dot on the hour scale
+  const nowLine = isToday ? `<div class="hs-now" style="--f:${((now - day) / DAY).toFixed(5)}"></div>` : "";
+  const legend = curves
+    ? `<small class="hs-legend"><i class="cur"></i>${esc(T.measured)} <i class="tgt"></i>${esc(T.device_setpoint)}</small>`
+    : "";
   return `<div class="hs">
-    <div class="hs-scale"><div class="hs-name"></div><div class="hs-ticks">${ticks}</div></div>
-    ${rows}
+    <div class="hs-scale"><div class="hs-name">${legend}</div><div class="hs-ticks">${ticks}</div></div>
+    ${rows}${xRows}${nowLine}
   </div>`;
+}
+
+/** One line per agenda: its state now, what comes next and in how long.
+ *  ctx: { hass, T, agendas, now, steer }; steer: may skip ahead and resume. */
+export function renderNext(ctx) {
+  const { hass, T, agendas, now, steer } = ctx;
+  const at = (w) => {
+    const n = wm(w);
+    const day = dayOf(n) === dayOf(now) ? "" : `${fmtDay(n, T._lang, { weekday: "short" })} `;
+    return `${day}${wall(n).slice(11)}`;
+  };
+  const rows = agendas.map((a) => {
+    const id = esc(a.entry_id);
+    const withState = hasStates(a);
+    const chip = (st, text) => {
+      const color = stateColor(hass, a, st) || "#e0e0e0";
+      return `<span class="nx-chip" style="--c:${esc(color)};--t:${esc(textColor(color))}">${esc(text)}</span>`;
+    };
+    const nowChip = withState ? chip(a.state, a.state ? stateLabel(hass, a, a.state, T) : T.none) : "";
+    let next = "";
+    if (a.next_change) {
+      const left = wm(a.next_change) - now;
+      const what =
+        withState && a.next_state ? chip(a.next_state, stateLabel(hass, a, a.next_state, T)) : esc(a.next_label || "");
+      next = `<span class="nx-next">→ ${what} <span>${esc(T.at)} ${esc(at(a.next_change))}${left >= 0 && left < DAY ? ` · ${esc(T.in_time(left))}` : ""}</span></span>`;
+    }
+    const off = withState ? offSchedule(a, T, at) : [];
+    const can = steer && a.enabled && withState && (a.settings.entities || []).length > 0;
+    const buttons = can
+      ? `${off.length ? `<button class="ic" data-resume="${id}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}${a.next_change ? `<button class="ic" data-advance="${id}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}`
+      : "";
+    return `<div class="nx-row ${a.enabled ? "" : "paused"}">
+      <span class="dot" style="--c:${esc(a.settings.color)}"></span>
+      <div class="nx-main"><b>${esc(a.name)}</b>
+        <div class="nx-line">${nowChip}${next}</div>
+        ${off.length ? `<div class="nx-off"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>${esc(off.join(" · "))}</div>` : ""}
+        ${a.enabled ? "" : `<div class="nx-off">${esc(T.paused)}</div>`}
+      </div>
+      ${buttons ? `<div class="nx-act">${buttons}</div>` : ""}
+    </div>`;
+  });
+  return `<div class="nx">${rows.join("")}</div>`;
 }
 
 /** ctx: { hass, T, agendas, editable } */
@@ -388,6 +546,23 @@ export function renderList(ctx) {
 
 export const VIEW_STYLES = `
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); flex: none; }
+  .nx { display: flex; flex-direction: column; }
+  .nx-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 4px; border-top: 1px solid var(--agenda-line); }
+  .nx-row:first-child { border-top: none; }
+  .nx-row .dot { margin-top: 5px; }
+  .nx-row.paused { opacity: .55; }
+  .nx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .nx-main b { font-weight: 600; font-size: 14.5px; }
+  .nx-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; color: var(--secondary-text-color); }
+  .nx-next { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .nx-chip { display: inline-block; padding: 1px 9px; border-radius: 99px; font-weight: 700; font-size: 12.5px; background: var(--c); color: var(--t); }
+  .nx-off { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--warning-color, #f57c00); }
+  .nx-off ha-icon { --mdc-icon-size: 15px; }
+  .nx-act { display: flex; flex: none; }
+  .nx-act .ic { border: none; background: none; color: var(--secondary-text-color); cursor: pointer; border-radius: 50%; width: 34px; height: 34px;
+    display: inline-grid; place-items: center; }
+  .nx-act .ic:hover { background: var(--agenda-hover); color: var(--primary-text-color); }
+  .nx-act .ic ha-icon { --mdc-icon-size: 20px; }
 
   /* ---- week ---- */
   .wk { --gutter: 46px; display: flex; flex-direction: column; min-width: calc(var(--gutter) + var(--days) * 78px); }
@@ -454,10 +629,19 @@ export const VIEW_STYLES = `
   .ghost.short .ev-main { font-size: 12px; }
   .ghost.cont { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: none; }
   .ghost.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: none; }
+  .wk-x { display: block; max-width: calc(100% - 6px); box-sizing: border-box; margin-top: 1px; padding: 0 6px; border-radius: 6px; font: inherit;
+    font-size: 10.5px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: var(--primary-text-color);
+    border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent); background: color-mix(in srgb, var(--c) 18%, transparent); }
+  .wk-xmore { font-size: 10.5px; color: var(--secondary-text-color); }
+  .wk-col.has-x .ev, .wk-col.has-x .ghost, .wk-col.has-x .gap { right: calc(26% + 2px); }
+  .xev { position: absolute; width: 25%; min-height: 12px; box-sizing: border-box; border-radius: 6px; padding: 2px 4px; overflow: hidden; z-index: 1;
+    font-size: 10.5px; line-height: 1.25; cursor: pointer; color: var(--primary-text-color); border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent);
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 30%, transparent) 0 6px, color-mix(in srgb, var(--c) 14%, transparent) 6px 12px); }
+  .xev b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .xev.cont { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: none; }
+  .xev.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-style: none; }
   .now { position: absolute; left: -1px; right: 0; height: 2px; background: var(--agenda-now); z-index: 30; pointer-events: none; }
   .now::before { content: ""; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--agenda-now); }
-  .now.v { top: 0; bottom: 0; width: 2px; height: auto; left: auto; }
-  .now.v::before { left: -4px; top: -5px; }
   .drag-tip { position: fixed; z-index: 1000; pointer-events: none; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;
     background: var(--primary-text-color); color: var(--card-background-color); box-shadow: 0 2px 8px rgba(0,0,0,.3); }
 
@@ -486,9 +670,14 @@ export const VIEW_STYLES = `
   .mo-ev b { font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
   .mo-ev span { overflow: hidden; text-overflow: ellipsis; }
   .mo-more { font-size: 11.5px; color: var(--secondary-text-color); padding: 0 6px; }
+  .mo-ev.mo-x { background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--primary-text-color);
+    border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent); line-height: 1.35; }
 
   /* ---- house ---- */
-  .hs { --name-w: 190px; display: flex; flex-direction: column; gap: 10px; padding: 8px 4px 4px; }
+  .hs { --name-w: 190px; --pad: 4px; position: relative; display: flex; flex-direction: column; gap: 10px; padding: 8px var(--pad) var(--pad); }
+  .hs-now { position: absolute; top: 28px; bottom: var(--pad); width: 2px; margin-left: -1px; background: var(--agenda-now); z-index: 5; pointer-events: none;
+    left: calc(var(--pad) + var(--name-w) + 12px + (100% - 2 * var(--pad) - var(--name-w) - 12px) * var(--f)); }
+  .hs-now::before { content: ""; position: absolute; left: -4px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: var(--agenda-now); }
   .hs-scale, .hs-row { display: grid; grid-template-columns: var(--name-w) 1fr; align-items: center; gap: 12px; }
   .hs-ticks { position: relative; height: 16px; }
   .hs-ticks span { position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
@@ -507,10 +696,23 @@ export const VIEW_STYLES = `
   .seg { position: absolute; top: 0; bottom: 0; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
     background: var(--c); color: var(--t); border-right: 1px solid rgba(255,255,255,.35); cursor: pointer; overflow: hidden; transition: filter .15s; }
   .seg:hover { filter: brightness(1.06) saturate(1.1); }
-  .seg span { font-weight: 700; font-size: 13px; white-space: nowrap; padding: 0 4px; }
+  .seg span { font-weight: 700; font-size: 13px; white-space: nowrap; padding: 0 4px; position: relative; z-index: 3; }
+  .hs-curve { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+  .hs-curve * { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  .hs-curve .halo { stroke: rgba(0, 0, 0, .35); stroke-width: 3.2; }
+  .hs-curve .cur { stroke: #fff; stroke-width: 1.6; }
+  .hs-curve .tgt { stroke: #fff; stroke-width: 1.3; stroke-dasharray: 5 4; opacity: .85; }
+  .hs-legend { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--secondary-text-color); white-space: nowrap; }
+  .hs-legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--secondary-text-color); }
+  .hs-legend i.tgt { border-top-style: dashed; margin-left: 6px; }
   .seg.gap { background: color-mix(in srgb, var(--c) 22%, transparent); color: var(--primary-text-color); }
   .seg.gap span { font-weight: 500; opacity: .75; }
   .seg.empty { cursor: copy; border: none; }
+  .xrow .hs-name { cursor: default; }
+  .hs-track.x { height: 28px; }
+  .seg.xseg { color: var(--primary-text-color); border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent); border-radius: 8px;
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 34%, transparent) 0 6px, color-mix(in srgb, var(--c) 18%, transparent) 6px 12px); }
+  .seg.xseg span { font-weight: 500; font-size: 12px; }
 
   /* ---- list ---- */
   .ls { padding: 4px 0 12px; }

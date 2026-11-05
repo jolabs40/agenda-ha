@@ -1,21 +1,25 @@
-// Read-only dashboard card: today for every agenda, or one agenda's week.
-// Clicking it opens the panel.
+// Dashboard card: today for every agenda, one agenda's week, or the next changes.
+// Clicking it opens the panel; the next changes view also skips ahead and resumes.
 //
 //   type: custom:agenda-card
-//   view: house            # or week
+//   view: house            # or week, or next
 //   agenda: Bedroom        # week view: name of the agenda
-//   agendas: [Bedroom]     # house view: only these agendas (optional)
+//   agendas: [Bedroom]     # house and next views: only these agendas (optional)
 //   title: Heating         # optional
 
 const V = new URL(import.meta.url).search;
 const lib = await import(`./agenda-lib.js${V}`);
 const views = await import(`./agenda-views.js${V}`);
 
-const { DAY, dayOf, esc, mondayOf, nowWall, wallDate, texts } = lib;
+const { DAY, dayOf, esc, loadHaComponents, mondayOf, nowWall, wallDate, texts } = lib;
 
 class AgendaCard extends HTMLElement {
   static getStubConfig() {
     return { view: "house" };
+  }
+
+  static getConfigElement() {
+    return document.createElement("agenda-card-editor");
   }
 
   setConfig(config) {
@@ -70,6 +74,7 @@ class AgendaCard extends HTMLElement {
   }
 
   getCardSize() {
+    if (this._config?.view === "next") return 1 + this._agendas().length;
     return this._config?.view === "week" ? 10 : 4;
   }
 
@@ -98,6 +103,11 @@ class AgendaCard extends HTMLElement {
   async _load() {
     try {
       this._data = await this._hass.callWS({ type: "agenda/list" });
+      if (this._config.view === "next") {
+        this._error = null;
+        this._render();
+        return;
+      }
       const now = nowWall(this._data.time_zone);
       const first = this._config.view === "week" ? mondayOf(now) : dayOf(now);
       const days = this._config.view === "week" ? 7 : 1;
@@ -110,6 +120,12 @@ class AgendaCard extends HTMLElement {
       this._skipped = res.skipped || {};
       this._holidays = res.holidays || {};
       this._vacation = res.vacation || {};
+      this._history =
+        this._config.view === "week"
+          ? {}
+          : await lib
+              .climateHistory((m) => this._hass.callWS(m), this._agendas(), first, this._data.time_zone)
+              .catch(() => ({}));
       this._error = null;
     } catch (err) {
       this._error = err.message || String(err);
@@ -138,17 +154,32 @@ class AgendaCard extends HTMLElement {
         now,
         editable: false,
       };
-      body =
-        this._config.view === "week"
-          ? `<div class="scroll">${views.renderWeek({ ...ctx, firstDay: mondayOf(now), days: 7, hourH: this._config.hour_height || 20 })}</div>`
-          : views.renderHouse({ ...ctx, day: dayOf(now) });
+      // the same rights as editing events in the panel
+      const steer = Boolean(this._hass.user?.is_admin || this._data.shared?.allow_users);
+      if (this._config.view === "next") body = views.renderNext({ ...ctx, steer });
+      else if (this._config.view === "week")
+        body = `<div class="scroll">${views.renderWeek({ ...ctx, firstDay: mondayOf(now), days: 7, hourH: this._config.hour_height || 20 })}</div>`;
+      else body = views.renderHouse({ ...ctx, day: dayOf(now), history: this._history });
     }
-    const title = this._config.title ?? (this._config.view === "week" ? this._agendas()[0]?.name : T.title);
+    const view = this._config.view;
+    const title =
+      this._config.title ?? (view === "week" ? this._agendas()[0]?.name : view === "next" ? T.next_changes : T.title);
     this.shadowRoot.innerHTML = `<style>${views.VIEW_STYLES}${CARD_STYLES}</style>
       <ha-card>${title ? `<div class="head"><ha-icon icon="mdi:calendar-month"></ha-icon>${esc(title)}</div>` : ""}
         <div class="body ${this._config.view}">${body}</div></ha-card>`;
     requestAnimationFrame(() => views.fitLabels(this.shadowRoot));
-    this.shadowRoot.querySelector("ha-card").addEventListener("click", () => {
+    this.shadowRoot.querySelector("ha-card").addEventListener("click", (e) => {
+      const button = e.target.closest("[data-advance], [data-resume]");
+      if (button) {
+        const action = button.dataset.advance ? "next" : "resume";
+        const id = button.dataset.advance || button.dataset.resume;
+        button.disabled = true;
+        this._hass
+          .callWS({ type: "agenda/override", entry_id: id, action })
+          .catch((err) => (this._error = err.message || String(err)))
+          .finally(() => this._load());
+        return;
+      }
       history.pushState(null, "", "/agenda");
       window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
     });
@@ -178,11 +209,91 @@ const CARD_STYLES = `
   @media (max-width: 500px) { .hs { --name-w: 84px; } .hs-name small { display: none; } }
 `;
 
+/** The card's settings in the dashboard editor, with Home Assistant's own form. */
+class AgendaCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    if (first) this._load();
+    else if (this._form) this._form.hass = hass;
+  }
+
+  async _load() {
+    try {
+      const data = await this._hass.callWS({ type: "agenda/list" });
+      this._names = data.agendas.map((a) => a.name);
+    } catch (_err) {
+      this._names = [];
+    }
+    await loadHaComponents();
+    await Promise.race([customElements.whenDefined("ha-form"), new Promise((r) => setTimeout(r, 5000))]);
+    this._render();
+  }
+
+  _render() {
+    if (!this._hass || !this._config || !this._names || !customElements.get("ha-form")) return;
+    const T = texts(this._hass);
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.addEventListener("value-changed", (e) => this._changed(e.detail.value));
+      this.replaceChildren(this._form);
+    }
+    const view = this._config.view || "house";
+    const options = this._names.map((name) => ({ value: name, label: name }));
+    const views = [
+      ["house", T.house],
+      ["week", T.week],
+      ["next", T.next_changes],
+    ].map(([value, label]) => ({ value, label }));
+    this._form.hass = this._hass;
+    this._form.schema = [
+      { name: "view", selector: { select: { mode: "dropdown", options: views } } },
+      view === "week"
+        ? { name: "agenda", selector: { select: { mode: "dropdown", options } } }
+        : { name: "agendas", selector: { select: { multiple: true, options } } },
+      { name: "title", selector: { text: {} } },
+      ...(view === "week" ? [{ name: "hour_height", selector: { number: { min: 12, max: 60, mode: "box" } } }] : []),
+    ];
+    this._form.computeLabel = (s) =>
+      ({
+        view: T.card_view,
+        agenda: T.agenda,
+        agendas: T.card_agendas,
+        title: T.card_title,
+        hour_height: T.card_hour_height,
+      })[s.name] || s.name;
+    this._form.data = { ...this._config, view };
+  }
+
+  _changed(value) {
+    const config = { ...value };
+    // empty fields are left out of the YAML
+    for (const key of Object.keys(config)) {
+      const v = config[key];
+      if (v === "" || v == null || (Array.isArray(v) && !v.length)) delete config[key];
+    }
+    if (config.view === "week") delete config.agendas;
+    else {
+      delete config.agenda;
+      delete config.hour_height;
+    }
+    this._config = config;
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
+    this._render();
+  }
+}
+
 if (!customElements.get("agenda-card")) customElements.define("agenda-card", AgendaCard);
+if (!customElements.get("agenda-card-editor")) customElements.define("agenda-card-editor", AgendaCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "agenda-card",
   name: "Agenda",
-  description: "The day of every room, or the week of one agenda, in colours.",
+  description: "The day of every room, the week of one agenda, or what changes next.",
   preview: false,
 });

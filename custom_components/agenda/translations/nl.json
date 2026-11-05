@@ -87,6 +87,30 @@
     "end_absence": {
       "name": "Afwezigheidsmodus beëindigen",
       "description": "De agenda's volgen weer hun programma."
+    },
+    "advance": {
+      "name": "Naar de volgende toestand",
+      "description": "Past nu de toestand van de volgende wissel van de agenda toe, tot die tijd komt."
+    },
+    "apply_event": {
+      "name": "Gebeurtenis nu toepassen",
+      "description": "Past nu de toestand van een gebeurtenis toe, tot het volgende voorkomen eindigt.",
+      "fields": {
+        "event": {
+          "name": "Gebeurtenis",
+          "description": "Naam van de gebeurtenis (de eerstvolgende)."
+        }
+      }
+    },
+    "resume": {
+      "name": "Schema hervatten",
+      "description": "Beëindigt de afwijking en neemt de met de hand gewijzigde apparaten weer over."
+    }
+  },
+  "issues": {
+    "not_applied": {
+      "title": "{entity} volgt de agenda {agenda} niet",
+      "description": "Agenda heeft {state} twee keer naar {entity} gestuurd, en het apparaat toont nog steeds iets anders. Controleer of het bereikbaar is en deze toestand accepteert (grenzen, modi). Deze melding verdwijnt zodra het apparaat de agenda weer volgt."
     }
   }
 }

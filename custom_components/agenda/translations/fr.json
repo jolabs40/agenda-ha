@@ -87,6 +87,30 @@
     "end_absence": {
       "name": "Terminer le mode absence",
       "description": "Les agendas reprennent leur programme."
+    },
+    "advance": {
+      "name": "Passer au suivant",
+      "description": "Applique dès maintenant l'état du prochain changement de l'agenda, jusqu'à son heure."
+    },
+    "apply_event": {
+      "name": "Appliquer un événement maintenant",
+      "description": "Applique dès maintenant l'état d'un événement, jusqu'à la fin de sa prochaine occurrence.",
+      "fields": {
+        "event": {
+          "name": "Événement",
+          "description": "Nom de l'événement (le premier à venir)."
+        }
+      }
+    },
+    "resume": {
+      "name": "Reprendre le planning",
+      "description": "Met fin à la dérogation et reprend les appareils réglés à la main."
+    }
+  },
+  "issues": {
+    "not_applied": {
+      "title": "{entity} ne suit pas l'agenda {agenda}",
+      "description": "Agenda a envoyé deux fois {state} à {entity}, et l'appareil affiche toujours autre chose. Vérifiez qu'il est joignable et qu'il accepte cet état (ses limites, ses modes). Ce message disparaît dès que l'appareil suit de nouveau l'agenda."
     }
   }
 }

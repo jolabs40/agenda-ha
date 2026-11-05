@@ -24,19 +24,42 @@ from homeassistant.util import dt as dt_util
 
 from . import devices, recurrence
 from .const import DOMAIN, SIGNAL_UPDATED
-from .manager import Agenda
+from .manager import MANUAL_HOLDS, Agenda
 from .migration import COLOR, upgrade_repeat
 from .shared import Shared
 
+HVAC_MODE = vol.All(cv.string, vol.NotIn(["off"]))
+
+# optional climate settings; unset ones are dropped since older versions refuse unknown keys
+CLIMATE_SETTINGS = {vol.Optional(key): vol.Any(None, cv.string) for key in devices.CLIMATE_SETTINGS}
+CLIMATE_EXTRAS = {vol.Optional("hvac_mode"): vol.Any(None, HVAC_MODE), **CLIMATE_SETTINGS}
+
+
+def _drop_unset(state: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in state.items() if value is not None}
+
+
 STATE_SCHEMA = vol.Any(
     None,
-    vol.Schema(
-        {
-            vol.Required("type"): "temperature",
-            vol.Required("temperature"): vol.All(vol.Coerce(float), vol.Range(min=4, max=35)),
-        }
+    vol.All(
+        vol.Schema(
+            {
+                vol.Required("type"): "temperature",
+                # 4 to 35 °C, or 39 to 95 °F
+                vol.Required("temperature"): vol.All(vol.Coerce(float), vol.Range(min=4, max=95)),
+                **CLIMATE_EXTRAS,
+            }
+        ),
+        _drop_unset,
     ),
-    vol.Schema({vol.Required("type"): "preset", vol.Required("preset"): cv.string}),
+    vol.All(
+        vol.Schema({vol.Required("type"): "preset", vol.Required("preset"): cv.string, **CLIMATE_EXTRAS}),
+        _drop_unset,
+    ),
+    vol.All(
+        vol.Schema({vol.Required("type"): "mode", vol.Required("hvac_mode"): HVAC_MODE, **CLIMATE_SETTINGS}),
+        _drop_unset,
+    ),
     vol.Schema({vol.Required("type"): "off"}),
     vol.Schema(
         {
@@ -58,11 +81,21 @@ STATE_SCHEMA = vol.Any(
 
 
 def _drop_empty_except(repeat: dict[str, Any]) -> dict[str, Any]:
-    """Leave the second calendar list out when unused: older versions refuse unknown keys,
-    so events stay editable after a downgrade."""
+    """Leave the second calendar list and unused calendar texts out: older versions refuse
+    unknown keys, so events stay editable after a downgrade."""
     if not repeat.get("except_calendars"):
         repeat.pop("except_calendars", None)
         repeat.pop("except_match", None)
+    listed = {*(repeat.get("calendars") or []), *(repeat.get("except_calendars") or [])}
+    texts = {
+        calendar: text.strip()
+        for calendar, text in (repeat.get("calendar_texts") or {}).items()
+        if calendar in listed and calendar != recurrence.HOLIDAYS_CALENDAR and text and text.strip()
+    }
+    if texts:
+        repeat["calendar_texts"] = texts
+    else:
+        repeat.pop("calendar_texts", None)
     return repeat
 
 
@@ -85,6 +118,8 @@ REPEAT_SCHEMA = vol.All(
             vol.Optional("calendar_match", default=recurrence.CALENDAR_ANY): vol.In(recurrence.CALENDAR_MATCHES),
             vol.Optional("except_calendars"): CALENDARS,
             vol.Optional("except_match"): vol.In(recurrence.CALENDAR_MATCHES),
+            # a calendar counts only the days of its events containing this text
+            vol.Optional("calendar_texts"): {cv.string: vol.Any(None, cv.string)},
             vol.Optional("period", default=recurrence.PERIOD_ALWAYS): vol.In(recurrence.PERIODS),
             vol.Optional("monthly", default=recurrence.MONTHLY_DAY): vol.In(recurrence.MONTHLY_MODES),
             vol.Optional("weeks", default=recurrence.WEEKS_ALL): vol.In(recurrence.WEEKS_MODES),
@@ -93,24 +128,51 @@ REPEAT_SCHEMA = vol.All(
     _drop_empty_except,
 )
 
+CLOCK = vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$")
+
 SUN_SCHEMA = vol.Any(
     None,
-    vol.Schema(
-        {
-            vol.Required("event"): vol.In(recurrence.SUN_EVENTS),
-            vol.Optional("offset", default=0): vol.All(
-                vol.Coerce(int), vol.Range(min=-recurrence.MAX_SUN_OFFSET, max=recurrence.MAX_SUN_OFFSET)
-            ),
-        }
+    vol.All(
+        vol.Schema(
+            {
+                vol.Required("event"): vol.In(recurrence.SUN_EVENTS),
+                vol.Optional("offset", default=0): vol.All(
+                    vol.Coerce(int), vol.Range(min=-recurrence.MAX_SUN_OFFSET, max=recurrence.MAX_SUN_OFFSET)
+                ),
+                # clock bounds of the sun time, left out when unset for older versions
+                vol.Optional("not_before"): vol.Any(None, CLOCK),
+                vol.Optional("not_after"): vol.Any(None, CLOCK),
+            }
+        ),
+        _drop_unset,
     ),
 )
 
-CONDITION_SCHEMA = vol.Schema(
-    {
-        vol.Required("entity_id"): cv.entity_id,
-        vol.Required("state"): vol.All(vol.Coerce(str), vol.Length(min=1)),
-        vol.Optional("not", default=False): bool,
-    }
+
+def _has_bound(cond: dict[str, Any]) -> dict[str, Any]:
+    if cond.get("above") is None and cond.get("below") is None:
+        raise vol.Invalid("a number condition needs above or below")
+    return _drop_unset(cond)
+
+
+CONDITION_SCHEMA = vol.Any(
+    vol.Schema(
+        {
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Required("state"): vol.All(vol.Coerce(str), vol.Length(min=1)),
+            vol.Optional("not", default=False): bool,
+        }
+    ),
+    vol.All(
+        vol.Schema(
+            {
+                vol.Required("entity_id"): cv.entity_id,
+                vol.Optional("above"): vol.Any(None, vol.Coerce(float)),
+                vol.Optional("below"): vol.Any(None, vol.Coerce(float)),
+            }
+        ),
+        _has_bound,
+    ),
 )
 
 EVENT_SCHEMA = vol.Schema(
@@ -132,6 +194,7 @@ EVENT_SCHEMA = vol.Schema(
         vol.Optional("start_sun", default=None): SUN_SCHEMA,
         vol.Optional("end_sun", default=None): SUN_SCHEMA,
         vol.Optional("conditions", default=[]): [CONDITION_SCHEMA],
+        vol.Optional("conditions_match"): vol.In(["all", "any"]),
     }
 )
 
@@ -145,6 +208,8 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("resync_on_start"): bool,
         vol.Optional("follow_absence"): bool,
         vol.Optional("away_state"): STATE_SCHEMA,
+        vol.Optional("manual_hold"): vol.In(MANUAL_HOLDS),
+        vol.Optional("presence_jitter"): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
     }
 )
 
@@ -169,7 +234,11 @@ def _event_json(event: dict[str, Any]) -> dict[str, Any]:
         repeat["until"] = str(repeat["until"])
     repeat["exclude"] = sorted({str(d) for d in repeat.get("exclude") or []})
     repeat["include"] = sorted({str(d) for d in repeat.get("include") or []})
-    return {**event, "repeat": repeat}
+    event = {**event, "repeat": repeat}
+    # "all" is the default, left out for older versions
+    if event.get("conditions_match") != "any" or len(event.get("conditions") or []) < 2:
+        event.pop("conditions_match", None)
+    return event
 
 
 def _keep_actions(event: dict[str, Any], stored: dict[str, Any] | None) -> dict[str, Any]:
@@ -209,6 +278,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_detach,
         ws_save_settings,
         ws_set_enabled,
+        ws_override,
         ws_resync,
         ws_holiday_options,
         ws_save_shared,
@@ -395,11 +465,39 @@ async def ws_set_enabled(hass: HomeAssistant, connection: websocket_api.ActiveCo
     )
 
 
+@require_editor
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "agenda/override",
+        vol.Required("entry_id"): cv.string,
+        vol.Required("action"): vol.In(["next", "event", "resume"]),
+        vol.Optional("event_id"): cv.string,
+        # the state shown in the editor, which may not be saved yet
+        vol.Optional("state"): STATE_SCHEMA,
+    }
+)
+@websocket_api.async_response
+async def ws_override(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Skip to the next state, put an event's state ahead of the schedule, or go back to it."""
+
+    async def run():
+        agenda = _agenda(hass, msg["entry_id"])
+        if msg["action"] == "next":
+            await agenda.async_advance()
+        elif msg["action"] == "event":
+            await agenda.async_apply_event(msg.get("event_id") or "", msg.get("state"))
+        else:
+            await agenda.async_resume()
+
+    await _guard(connection, msg, run)
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): "agenda/resync", vol.Required("entry_id"): cv.string})
 @websocket_api.async_response
 async def ws_resync(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
-    await _guard(connection, msg, lambda: _agenda(hass, msg["entry_id"]).async_resync())
+    # the Apply now button of the settings: devices set by hand are taken back too
+    await _guard(connection, msg, lambda: _agenda(hass, msg["entry_id"]).async_resync(take_back=True))
 
 
 @websocket_api.require_admin

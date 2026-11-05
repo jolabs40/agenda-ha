@@ -27,44 +27,60 @@ agenda goes back to its default state.
     A block names the calendars its event depends on, and outlines the one that makes it run that
     day; the days a calendar takes out of a series show hatched.
   - Month: each day's events, with public and school holidays.
-  - House: every agenda over one day, with what each device is doing now.
+  - House: every agenda over one day, with what each device is doing now and, for thermostats, the
+    measured temperature drawn under the setpoint.
   - List: all events and how they repeat.
 - On a wide screen the agendas are listed in a column, as in the Calendar panel: tick the ones to
   show, see what each one is doing and its next change, pause it or open its settings. On a phone,
   chips at the top do the same. The Add event button sits at the bottom right.
+- Other calendars of Home Assistant (school holidays, a family calendar...) can be ticked in the
+  same column and show hatched in the week, month and house views, for information only.
 - Events repeat every N days, weeks (on chosen weekdays, or on even or odd weeks only) or months
   (on the same date, on the 2nd Monday, on the last Friday...), optionally until a date. Single
   days can be removed from or added to a series.
-- The start or the end of an event can follow sunrise or sunset, with an offset.
-- Conditions on entities: an event takes charge only while, for instance, someone is home or a
-  window is closed.
+- The start or the end of an event can follow sunrise or sunset, with an offset, not before or at
+  the latest at a given time.
+- Conditions on entities: an event takes charge only while, for instance, someone is home, a
+  window is closed or the outdoor temperature is below 5 °C; all of them, or at least one.
 - Public holidays of your country can be skipped, or used as the only days.
 - Calendars can act as conditions: skip the days with an event in them (trips, absences), keep
   only those days, or both on the same event. With several calendars, an event in one of them is
   enough, or one is needed in each of them.
   Public holidays can be one of these calendars, for an event that runs on home office days or on
-  public holidays.
+  public holidays. A calendar can also count only its events containing a text, such as the red
+  days of an electricity tariff calendar.
 - A school holiday calendar can be set once for all agendas. Each repeating event then applies
   always, only during school term, or only during school holidays, and the week view marks the
   holidays.
 - Start and end actions per event, edited with the regular Home Assistant action editor.
+- Changes made by hand are respected: a device set by hand is left as it is until the next change,
+  or the next day, or put back at once, as chosen per agenda. A restart keeps them.
+- Overrides: Skip to next applies the next change now, Apply now (in the event editor) applies an
+  event until its end, Resume the schedule cancels them.
+- Each device is followed up. One that is unavailable gets its state when it comes back; one that
+  does not take its state gets a second try, then a Repairs issue. Devices without state feedback
+  (radio covers) get their command once, one after the other with a short pause.
+- Air conditioners: an event can set the mode, fan speed and swing with the temperature, or a mode
+  alone (fan only, dry).
 - An absence mode for the whole house: the agendas that follow it keep their away state until a
-  date, or until it is stopped.
+  date, or until it is stopped. The others (lights) can simulate presence meanwhile.
 - Per agenda: a `calendar` entity (Calendar panel, calendar triggers), an Active switch that
   pauses the agenda, Now and Next change sensors.
 - Actions for automations and voice assistants: skip the next occurrence, add or remove dates,
-  start or end the absence mode.
+  override the schedule, start or end the absence mode.
+- The logbook names the agenda that changed a device, and two events let automations react.
 - Non-admin users can be allowed to edit events; start and end actions stay with administrators.
 - After a restart the linked devices are put back in the state the agenda expects (can be turned
-  off per agenda).
-- A dashboard card, `custom:agenda-card`.
+  off per agenda), except those set by hand.
+- A dashboard card, `custom:agenda-card`, with a visual editor.
+- Temperatures in °C or °F, as set in Home Assistant.
 - English, French, German and Dutch.
 
 What an agenda can control:
 
 | Kind | Entities | States |
 |---|---|---|
-| Thermostats | `climate` | temperature, preset, off |
+| Thermostats | `climate` | temperature (with mode, fan and swing for air conditioners), preset, mode, off |
 | On / off | `switch`, `light`, `input_boolean`, `fan` | on (with brightness for lights), off |
 | Covers | `cover` | open, closed, position |
 | Selector | `select`, `input_select` | one of the options |
@@ -104,10 +120,32 @@ integration icon shows from Home Assistant 2026.3.
   Weekend event and a Night event starting at midnight: the night wins until it ends, then the
   weekend takes over.
 - On each change, end actions run first, then the state is applied, then start actions run.
-  Thermostats get their setpoint at every event start, so a manual change lasts until the next
-  event. Other devices are only called when their state differs.
+  Thermostats get their setpoint at every event start. Other devices are only called when their
+  state differs, except devices without state feedback: what they show is only a guess, so they
+  always get their command.
 - Times are local clock times: an event at 21:30 stays at 21:30 when daylight saving time changes.
 - Turning the Active switch off pauses the agenda completely.
+
+## Changes made by hand
+
+A device set by hand, on itself or in Home Assistant, is recognised as such. Changes made by hand
+(in the settings of each agenda) decides what follows:
+
+| Choice | What the agenda does |
+|---|---|
+| Kept until the next change (default) | leaves it until the next event starts or ends |
+| Kept until the next day | leaves it until midnight |
+| Put back at once as the agenda wants | sets it back after 5 seconds; after three times in ten minutes, leaves it until the next change |
+| The agenda always wins | ignores it, the next change applies as usual |
+
+A restart keeps these changes, and so does `agenda.resync`. Apply now in the settings takes every
+device back. The column shows "set by hand until...", and the Now sensor lists these devices in its
+`set_by_hand` attribute.
+
+Overrides change the schedule itself, until the time they show (`override_until` on the Now
+sensor): Skip to next applies the state of the next change at once (again: the one after), Apply
+now in the event editor applies that event's state until the end of its next occurrence. Resume
+the schedule cancels both, and takes back the devices set by hand.
 
 ## Actions
 
@@ -132,12 +170,15 @@ keep the actions already in place.
 
 Sun times are computed by Home Assistant, day by day, for the location set in Settings > System >
 General. When the sun brings the end of an event before its start (sunset after a fixed 21:00 end
-in summer), the event is skipped that day.
+in summer), the event is skipped that day. Not before and At the latest keep a sun time within
+bounds: covers that close at sunset, but not before 18:00.
 
 Conditions compare the state of an entity: `person.alex` is `home`, `binary_sensor.window` is not
-`on`. They are read when the event starts and whenever the entity changes. An event whose
-conditions stop holding hands over to the next event in charge, or to the default state; its end
-actions still run.
+`on`, `sensor.outdoor_temperature` is below `5`. With several conditions, the event needs all of
+them or at least one of them. They are read when the event starts and whenever the entity changes.
+An event whose conditions stop holding hands over to the next event in charge, or to the default
+state; its end actions still run. An entity that becomes unavailable keeps its last state for ten
+minutes, restarts included, so a sensor that drops out briefly changes nothing.
 
 ## Absence mode
 
@@ -146,6 +187,10 @@ The button at the top of the panel starts it, until a date or until it is stoppe
 that follows it (an option in its settings) keeps its away state, or its default state, and runs
 no action. At the end every agenda goes back to its schedule.
 
+An agenda that does not follow it can simulate presence instead (Presence simulation, in its
+settings): during an absence its starts and ends move at random by up to the chosen number of
+minutes, earlier or later, so lights do not go on at the same time every day.
+
 ## Automations
 
 | Action | Target | Data |
@@ -153,9 +198,12 @@ no action. At the end every agenda goes back to its schedule.
 | `agenda.skip_next` | an agenda's calendar | `event` (optional name): removes the next occurrence |
 | `agenda.add_dates` | an agenda's calendar | `event`, `dates`: adds occurrences on these days |
 | `agenda.remove_dates` | an agenda's calendar | `event`, `dates`: removes the occurrences on these days |
+| `agenda.advance` | an agenda's calendar | applies the next change now (Skip to next) |
+| `agenda.apply_event` | an agenda's calendar | `event` (name): applies that event until the end of its next occurrence |
+| `agenda.resume` | an agenda's calendar | ends the override and takes back the devices set by hand |
 | `agenda.set_absence` | | `until` (optional): starts the absence mode |
 | `agenda.end_absence` | | ends it |
-| `agenda.resync` | an agenda's calendar | puts the devices back in the state the agenda wants now |
+| `agenda.resync` | an agenda's calendar | puts the devices back in the state the agenda wants now, except those set by hand |
 
 ```yaml
 - action: agenda.skip_next
@@ -164,6 +212,44 @@ no action. At the end every agenda goes back to its schedule.
   data:
     event: Morning
 ```
+
+Each agenda's `calendar` entity also works with the calendar trigger of Home Assistant, with an
+offset if needed:
+
+```yaml
+triggers:
+  - trigger: calendar
+    event: start
+    entity_id: calendar.agenda_living_room
+    offset: "-0:15:00"
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      message: "{{ trigger.calendar_event.summary }} in 15 minutes"
+```
+
+## Events and logbook
+
+Each state given to a device fires `agenda_state_applied`; a device that still does not show it
+after a second try fires `agenda_state_failed` and gets a Repairs issue. Their data: `agenda`,
+`entry_id`, `entity_id`, `state`, `label` (the state as shown in the panel), and for
+`agenda_state_applied` the `reason` (`schedule`, `edit`, `resync`, `available`, `retry`...) and the
+`event` (`id` and `name`) when an event set it.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: agenda_state_failed
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      message: "{{ trigger.event.data.entity_id }} did not take {{ trigger.event.data.label }}"
+```
+
+The logbook shows a line for each state applied ("set by agenda Bedroom: 19 °C"), and the
+changes of the device name the agenda as their cause. When the logbook is filtered on one device,
+Home Assistant keeps only the lines of that device's integration: the cause is still shown there,
+the agenda's own line only in the full logbook.
 
 ## Public holidays
 
@@ -200,9 +286,16 @@ title: Heating                 # optional
 type: custom:agenda-card
 view: week
 agenda: Bedroom
+hour_height: 32                # optional
 ```
 
-Clicking the card opens the panel.
+```yaml
+type: custom:agenda-card
+view: next                     # time left, state now, next change, Skip to next and Resume
+agenda: Bedroom
+```
+
+The card has a visual editor. Clicking it opens the panel.
 
 ## Support
 

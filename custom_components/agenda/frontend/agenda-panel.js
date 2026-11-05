@@ -40,6 +40,9 @@ class AgendaPanel extends HTMLElement {
     // agendas left out of the views; older preferences name the single agenda shown instead
     this._hidden = new Set(Array.isArray(prefs.hidden) ? prefs.hidden : []);
     this._only = Array.isArray(prefs.hidden) ? null : prefs.selected;
+    // calendars that are not agendas, shown for information, and their events
+    this._cals = new Set(Array.isArray(prefs.calendars) ? prefs.calendars : []);
+    this._ext = {};
     this._wide = false;
     this._anchor = null; // day shown (wall minutes)
     this._data = null;
@@ -67,6 +70,19 @@ class AgendaPanel extends HTMLElement {
     this.T = texts(hass);
     if (first) this._init();
     else this._live();
+    // a calendar added or removed meanwhile: the lists of other calendars follow
+    const cals = Object.keys(hass.states)
+      .filter((id) => id.startsWith("calendar."))
+      .join();
+    if (cals !== this._calKey) {
+      const known = this._calKey !== undefined;
+      this._calKey = cals;
+      if (known && this._data) {
+        this._renderSide();
+        this._renderBar();
+        this._renderTabs();
+      }
+    }
     this._dialogs.forEach((d) => d.setHass?.(hass));
   }
 
@@ -202,6 +218,14 @@ class AgendaPanel extends HTMLElement {
     this._skipped = res.skipped || {};
     this._holidays = res.holidays || {};
     this._vacation = res.vacation || {};
+    this._history = {};
+    const tz = this._data.time_zone || this._hass.config.time_zone;
+    const cals = [...this._cals].filter((id) => this._hass.states[id]);
+    this._ext = cals.length ? await lib.calendarEvents(this._hass, cals, a, b, tz).catch(() => ({})) : {};
+    if (this._view === "house" && this._anchor <= this._now()) {
+      // the curves are a bonus: the view works without the recorder
+      this._history = await lib.climateHistory((m) => this.ws(m), this._shown(), this._anchor, tz).catch(() => ({}));
+    }
   }
 
   _now() {
@@ -249,7 +273,49 @@ class AgendaPanel extends HTMLElement {
   }
 
   _savePrefs() {
-    savePrefs({ view: this._view, hidden: [...this._hidden] });
+    savePrefs({ view: this._view, hidden: [...this._hidden], calendars: [...this._cals] });
+  }
+
+  /** Calendars of Home Assistant that are not agendas: shown for information, never used. */
+  _otherCalendars() {
+    const own = new Set(this._data.agendas.map((a) => a.agenda_entities?.calendar));
+    return Object.keys(this._hass.states)
+      .filter((id) => id.startsWith("calendar.") && !own.has(id))
+      .map((id) => ({ id, name: lib.friendlyName(this._hass, id), color: lib.calendarColor(id) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** The other calendars shown, with their events. */
+  _external() {
+    return this._otherCalendars()
+      .filter((c) => this._cals.has(c.id))
+      .map((c) => ({ ...c, events: (this._ext[c.id] || []).map((e, i) => ({ ...e, i })) }));
+  }
+
+  async _showCalendars(ids) {
+    this._cals = new Set(ids);
+    this._savePrefs();
+    await this._loadOcc();
+    this._renderAll();
+  }
+
+  /** What an event of another calendar is about: it can only be read here. */
+  _openExternal(el) {
+    const cal = this._external().find((c) => c.id === el.dataset.xev);
+    const ev = cal?.events[Number(el.dataset.xi)];
+    if (!ev) return;
+    const T = this.T;
+    const s = wm(ev.start);
+    const e = wm(ev.end);
+    const day = (m) => fmtDay(m, T._lang, { weekday: "long", day: "numeric", month: "long" });
+    let when = `${day(s)} ${wall(s).slice(11)}–${wall(e).slice(11)}`;
+    if (ev.all_day) when = e - s > DAY ? `${day(s)} – ${day(e - DAY)}` : day(s);
+    else if (dayOf(e - 1) !== dayOf(s)) when = `${day(s)} ${wall(s).slice(11)} – ${day(e)} ${wall(e).slice(11)}`;
+    dialogs.confirmDialog(this.dialogHost, {
+      title: ev.summary || cal.name,
+      text: [`${cal.name} · ${when}`, ev.location, ev.description].filter(Boolean).join("\n\n"),
+      buttons: [{ label: T.close, value: "ok", primary: true }],
+    });
   }
 
   _isWide() {
@@ -278,6 +344,23 @@ class AgendaPanel extends HTMLElement {
     this.shadowRoot.querySelector(".pane").classList.toggle("fab-on", on);
   }
 
+  /** A wall time, with its weekday when it is not today. */
+  _at(w) {
+    const n = wm(w);
+    const day = dayOf(n) === dayOf(this._now()) ? "" : `${fmtDay(n, this.T._lang, { weekday: "short" })} `;
+    return `${day}${wall(n).slice(11)}`;
+  }
+
+  /** What takes the agenda off its schedule now: an override, devices set by hand. */
+  _offSchedule(a) {
+    return lib.offSchedule(a, this.T, (w) => this._at(w));
+  }
+
+  /** Whether this user may skip ahead or resume the schedule of this agenda. */
+  _canSteer(a) {
+    return this._canEdit() && a.enabled && kinds.hasStates(a) && (a.settings.entities || []).length > 0;
+  }
+
   /** One line under an agenda's name: its state now and the next change. */
   _summary(a) {
     const T = this.T;
@@ -285,7 +368,9 @@ class AgendaPanel extends HTMLElement {
     if (!kinds.hasStates(a)) return "";
     const hass = this._hass;
     const parts = [a.state ? kinds.stateLabel(hass, a, a.state, T) : T.none];
-    if (a.next_change) {
+    const off = this._offSchedule(a);
+    if (off.length) parts.push(...off);
+    else if (a.next_change) {
       const n = wm(a.next_change);
       const day = dayOf(n) === dayOf(this._now()) ? "" : `${fmtDay(n, T._lang, { weekday: "short" })} `;
       const next = a.next_state ? `${kinds.stateLabel(hass, a, a.next_state, T)} ` : "";
@@ -313,8 +398,11 @@ class AgendaPanel extends HTMLElement {
         const alone = on && shown === 1;
         return `<div class="sa ${on ? "" : "off"} ${a.enabled ? "" : "paused"}">
           <button class="cb-btn" data-check="${esc(a.entry_id)}" role="checkbox" aria-checked="${on}" aria-label="${esc(a.name)}">${box(on ? "on" : "", color, textColor(color))}</button>
+          <ha-icon class="sa-kind" icon="${esc(kinds.kindIcon(a))}" title="${esc(T.kinds[kinds.kindOf(a)] || "")}"></ha-icon>
           <button class="sa-name" data-solo="${esc(a.entry_id)}" title="${esc(alone ? T.show_all : T.show_only)}"><b>${esc(a.name)}</b><small>${esc(this._summary(a))}</small></button>
           <label class="tgl sm" title="${esc(a.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(a.entry_id)}" ${a.enabled ? "checked" : ""}><span></span></label>
+          ${this._canSteer(a) && this._offSchedule(a).length ? `<button class="ic sm keep" data-resume="${esc(a.entry_id)}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}
+          ${this._canSteer(a) && a.next_change ? `<button class="ic sm" data-advance="${esc(a.entry_id)}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}
           ${this._isAdmin() ? `<button class="ic sm" data-settings="${esc(a.entry_id)}" title="${esc(T.settings)}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>`;
       })
@@ -323,10 +411,24 @@ class AgendaPanel extends HTMLElement {
     const all =
       agendas.length > 1
         ? `<div class="sa all"><button class="cb-btn" data-check-all role="checkbox" aria-checked="${state === "on"}" aria-label="${esc(T.all)}">${box(state, "var(--primary-color)", "var(--text-primary-color, #fff)")}</button>
+          <span class="sa-kind"></span>
           <button class="sa-name" data-check-all><b>${esc(T.all)}</b></button></div>`
         : "";
+    const others = this._otherCalendars();
+    const ext = others.length
+      ? `<div class="side-h">${esc(T.other_calendars)}<small>${esc(T.other_calendars_hint)}</small></div>${others
+          .map((c) => {
+            const on = this._cals.has(c.id);
+            return `<div class="sa x ${on ? "" : "off"}">
+              <button class="cb-btn" data-xcal="${esc(c.id)}" role="checkbox" aria-checked="${on}" aria-label="${esc(c.name)}">${box(on ? "on" : "", c.color, textColor(c.color))}</button>
+              <ha-icon class="sa-kind" icon="mdi:calendar-outline"></ha-icon>
+              <button class="sa-name" data-xcal="${esc(c.id)}" title="${esc(c.name)}"><b>${esc(c.name)}</b></button></div>`;
+          })
+          .join("")}`
+      : "";
     side.innerHTML = `${all}${rows}
-      ${this._isAdmin() ? `<button class="side-add" data-new-agenda><ha-icon icon="mdi:calendar-plus"></ha-icon>${esc(T.new_agenda)}</button>` : ""}`;
+      ${this._isAdmin() ? `<button class="side-add" data-new-agenda><ha-icon icon="mdi:calendar-plus"></ha-icon>${esc(T.new_agenda)}</button>` : ""}
+      ${ext}`;
   }
 
   _renderAway() {
@@ -404,11 +506,16 @@ class AgendaPanel extends HTMLElement {
       .join("");
     const allChip =
       agendas.length > 1 ? `<button class="ag all ${all ? "on" : ""}" data-chip="all">${esc(T.all)}</button>` : "";
+    // the other calendars, picked in a dialog: one chip for them all
+    const xn = this._external().length;
+    const xChip = this._otherCalendars().length
+      ? `<button class="ag xpick ${xn ? "on" : ""}" data-xpick title="${esc(T.other_calendars)}" aria-label="${esc(T.other_calendars)}"><ha-icon icon="mdi:calendar-multiple"></ha-icon>${xn || ""}</button>`
+      : "";
     const adds = this._isAdmin()
       ? `<button class="btn tonal" data-new-agenda title="${esc(T.new_agenda)}"><ha-icon icon="mdi:calendar-plus"></ha-icon>${esc(T.agenda)}</button>`
       : "";
     const sel = this._single();
-    bar.innerHTML = `<div class="ags">${allChip}${chips}${adds ? `<span class="adds">${adds}</span>` : ""}</div>
+    bar.innerHTML = `<div class="ags">${allChip}${chips}${xChip}${adds ? `<span class="adds">${adds}</span>` : ""}</div>
       ${
         sel
           ? `<div class="acts"><label class="tgl" title="${esc(sel.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(sel.entry_id)}" ${sel.enabled ? "checked" : ""}><span></span>${esc(sel.enabled ? T.active : T.paused)}</label>
@@ -421,8 +528,8 @@ class AgendaPanel extends HTMLElement {
   _renderStatus() {
     const box = this.shadowRoot.querySelector("[data-status]");
     const T = this.T;
-    // the column already says it on a wide screen
-    const sel = this._wide ? null : this._single();
+    // one agenda shown alone: its event, its devices and the buttons, which the column has no room for
+    const sel = this._single();
     if (!sel || this._view === "house") {
       box.innerHTML = "";
       box.hidden = true;
@@ -455,6 +562,17 @@ class AgendaPanel extends HTMLElement {
     }
     if (!sel.enabled)
       parts.push(`<span class="st-paused"><ha-icon icon="mdi:lock-outline"></ha-icon>${esc(T.paused)}</span>`);
+    const off = withState ? this._offSchedule(sel) : [];
+    if (off.length)
+      parts.push(
+        `<span class="st-off"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>${esc(off.join(" · "))}</span>`,
+      );
+    if (this._canSteer(sel)) {
+      const id = esc(sel.entry_id);
+      parts.push(
+        `<span class="st-act">${off.length ? `<button class="btn sm" data-resume="${id}"><ha-icon icon="mdi:restore"></ha-icon>${esc(T.resume)}</button>` : ""}${sel.next_change ? `<button class="btn sm" data-advance="${id}"><ha-icon icon="mdi:skip-next"></ha-icon>${esc(T.advance)}</button>` : ""}</span>`,
+      );
+    }
     box.innerHTML = parts.join("");
   }
 
@@ -486,6 +604,7 @@ class AgendaPanel extends HTMLElement {
       vacation: this._vacation,
       now,
       editable: this._canEdit(),
+      external: this._view === "list" ? [] : this._external(),
     };
     const scroll = box.querySelector(".card")?.scrollTop;
     if (this._view === "week") {
@@ -494,7 +613,7 @@ class AgendaPanel extends HTMLElement {
       const { start, weeks, month } = this._monthGrid();
       box.innerHTML = `<div class="card mo-card">${views.renderMonth({ ...ctx, firstDay: start, weeks, month })}</div>`;
     } else if (this._view === "house") {
-      box.innerHTML = `<div class="card hs-card">${views.renderHouse({ ...ctx, day: this._anchor })}</div>`;
+      box.innerHTML = `<div class="card hs-card">${views.renderHouse({ ...ctx, day: this._anchor, history: this._history })}</div>`;
     } else {
       box.innerHTML = `<div class="card ls-card">${views.renderList(ctx)}</div>`;
     }
@@ -560,6 +679,18 @@ class AgendaPanel extends HTMLElement {
     let el;
     if (hit("[data-menu]")) {
       this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
+    } else if ((el = hit("[data-xev]"))) {
+      this._openExternal(el);
+    } else if ((el = hit("[data-xcal]"))) {
+      const id = el.dataset.xcal;
+      this._showCalendars(this._cals.has(id) ? [...this._cals].filter((x) => x !== id) : [...this._cals, id]);
+    } else if (hit("[data-xpick]")) {
+      const ids = await dialogs.calendarsDialog(this.dialogHost, {
+        T: this.T,
+        calendars: this._otherCalendars(),
+        selected: this._cals,
+      });
+      if (ids) this._showCalendars(ids);
     } else if ((el = hit("[data-view]"))) {
       this._setView(el.dataset.view);
     } else if ((el = hit("[data-nav]"))) {
@@ -596,6 +727,10 @@ class AgendaPanel extends HTMLElement {
       this._newAgenda();
     } else if ((el = hit("[data-settings]"))) {
       this._openSettings(el.dataset.settings);
+    } else if ((el = hit("[data-advance]"))) {
+      this._try(() => this.ws({ type: "agenda/override", entry_id: el.dataset.advance, action: "next" }));
+    } else if ((el = hit("[data-resume]"))) {
+      this._try(() => this.ws({ type: "agenda/override", entry_id: el.dataset.resume, action: "resume" }));
     } else if (hit("[data-new-event]")) {
       const now = this._now();
       const start = Math.ceil((now + 1) / 60) * 60;
@@ -776,16 +911,25 @@ class AgendaPanel extends HTMLElement {
       });
       const res = await this._hass.callApi("POST", `config/config_entries/flow/${flow.flow_id}`, { name });
       if (res.type !== "create_entry") throw new Error(res.reason || res.errors?.name || "failed");
-      this._only = res.result?.entry_id || null;
-      setTimeout(() => this._load(), 800);
+      const id = res.result?.entry_id;
+      this._only = id || null;
+      // the entry sets itself up in the background: wait until the agenda is listed
+      for (let i = 0; id && i < 20; i++) {
+        const list = await this.ws({ type: "agenda/list" });
+        if (list.agendas.some((a) => a.entry_id === id)) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await this._load();
+      // a new agenda does nothing until it knows what it controls
+      if (id) this._openSettings(id);
     });
   }
 
   _onPointerDown(e) {
     const block = e.target.closest(".ev");
     const col = e.target.closest(".wk-col");
-    // a ghost is neither dragged nor a free slot: the click opens its series
-    if (!col || e.button !== 0 || !this._canEdit() || e.target.closest("[data-ghost]")) return;
+    // a ghost or another calendar's event is neither dragged nor a free slot: the click opens it
+    if (!col || e.button !== 0 || !this._canEdit() || e.target.closest("[data-ghost], [data-xev]")) return;
     const cols = this.shadowRoot.querySelector(".wk-cols");
     const colW = cols.getBoundingClientRect().width / 7;
     const hourH = parseFloat(getComputedStyle(this.shadowRoot.querySelector(".wk")).getPropertyValue("--hour-h"));
@@ -1020,7 +1164,7 @@ const STYLES = `
   .fab:focus-visible { outline: 2px solid var(--primary-text-color); outline-offset: 3px; }
   .fab ha-icon { --mdc-icon-size: 24px; }
   .fab-on .card:not(.hs-card)::after { content: ""; display: block; height: 92px; }
-  .side { flex: none; width: 256px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px;
+  .side { flex: none; width: 288px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px;
     overflow-y: auto; border-right: 1px solid var(--divider-color); }
   .sa { display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 0; border-radius: 10px; }
   .sa:hover { background: var(--agenda-hover); }
@@ -1030,6 +1174,8 @@ const STYLES = `
   .cb.on { background: var(--c); }
   .cb.some::after { content: ""; width: 8px; height: 2px; border-radius: 1px; background: var(--c); }
   .cb ha-icon { --mdc-icon-size: 14px; }
+  .sa-kind { flex: none; width: 18px; display: flex; margin-right: 6px; --mdc-icon-size: 18px; color: var(--secondary-text-color); }
+  .sa.off .sa-kind { opacity: .5; }
   .sa-name { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; font: inherit; text-align: left;
     border: none; background: none; color: inherit; padding: 4px 0; cursor: pointer; }
   .sa-name b { font-weight: 500; font-size: 14.5px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1039,7 +1185,7 @@ const STYLES = `
   .sa.paused small { color: var(--warning-color, #f57c00); }
   .sa .tgl { flex: none; }
   .sa .ic.sm { flex: none; width: 30px; height: 30px; opacity: 0; transition: opacity .15s; }
-  .sa:hover .ic.sm, .sa .ic.sm:focus-visible { opacity: .75; }
+  .sa:hover .ic.sm, .sa .ic.sm:focus-visible, .sa .ic.sm.keep { opacity: .75; }
   .sa .ic.sm ha-icon { --mdc-icon-size: 18px; }
   @media (hover: none) { .sa .ic.sm { opacity: .6; } }
   .tgl.sm span { width: 28px; height: 16px; }
@@ -1048,6 +1194,11 @@ const STYLES = `
   .side-add { margin-top: 6px; display: flex; align-items: center; gap: 12px; font: inherit; font-size: 14px; font-weight: 500; padding: 9px 10px;
     border: none; border-radius: 10px; background: none; color: var(--primary-color); cursor: pointer; text-align: left; }
   .side-add:hover { background: var(--agenda-hover); }
+  .side-h { display: flex; flex-direction: column; gap: 1px; margin: 16px 10px 4px; font-size: 12px; font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--secondary-text-color); }
+  .side-h small { font-size: 11.5px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+  .ag.xpick { --c: var(--primary-color); padding: 6px 11px; gap: 4px; }
+  .ag.xpick ha-icon { --mdc-icon-size: 17px; opacity: .85; }
   .bar { display: flex; align-items: center; gap: 8px 6px; flex-wrap: wrap; padding: 12px 16px 6px; }
   /* chips, buttons and the agenda's switch share the lines; the navigation gets its own */
   .ags { display: contents; }
@@ -1076,7 +1227,11 @@ const STYLES = `
   .acts { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; }
   .status { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; padding: 2px 18px 10px; font-size: 13.5px; color: var(--secondary-text-color); }
   .status b { color: var(--primary-text-color); }
-  .st-now, .st-next, .st-live { display: inline-flex; align-items: center; gap: 6px; }
+  .st-now, .st-next, .st-live, .st-off, .st-act { display: inline-flex; align-items: center; gap: 6px; }
+  .st-off { color: var(--warning-color, #f57c00); }
+  .st-off ha-icon, .st-act ha-icon { --mdc-icon-size: 16px; }
+  .st-act { flex-wrap: wrap; }
+  .st-act .btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; }
   .st-chip { display: inline-block; padding: 1px 9px; border-radius: 99px; font-weight: 700; color: #1f1f1f;
     background: color-mix(in srgb, var(--c) 80%, transparent); }
   .st-live { font-variant-numeric: tabular-nums; }

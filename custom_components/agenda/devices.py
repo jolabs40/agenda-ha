@@ -7,7 +7,10 @@ every event state is one of the kind's state types:
 
     climate   {"type": "temperature", "temperature": 20.5}
               {"type": "preset", "preset": "eco"}
+              {"type": "mode", "hvac_mode": "fan_only"}       # no setpoint
               {"type": "off"}
+              the first three may also carry hvac_mode, fan_mode, swing_mode
+              and swing_horizontal_mode, written only when chosen
     on_off    {"type": "on", "brightness": 80 | None}   # brightness: lights only, %
               {"type": "off"}
     cover     {"type": "position", "position": 0..100}  # 0 closed, 100 open
@@ -39,15 +42,25 @@ KINDS = tuple(KIND_DOMAINS)
 
 KIND_STATE_TYPES: dict[str, frozenset[str]] = {
     KIND_NONE: frozenset(),
-    KIND_CLIMATE: frozenset({"temperature", "preset", "off"}),
+    KIND_CLIMATE: frozenset({"temperature", "preset", "mode", "off"}),
     KIND_ON_OFF: frozenset({"on", "off"}),
     KIND_COVER: frozenset({"position"}),
     KIND_SELECT: frozenset({"option"}),
     KIND_NUMBER: frozenset({"value"}),
 }
 
-# hvac modes tried, in order, to switch a thermostat back on
+# hvac modes tried, in order, to switch back on a thermostat that has no turn_on
 ON_HVAC_MODES = ("heat", "heat_cool", "auto", "cool", "dry", "fan_only")
+
+# optional settings of a climate state, and the service setting each one
+CLIMATE_SETTINGS = {
+    "fan_mode": "set_fan_mode",
+    "swing_mode": "set_swing_mode",
+    "swing_horizontal_mode": "set_swing_horizontal_mode",
+}
+
+# ClimateEntityFeature.TURN_ON: the device goes back to its own last mode
+CLIMATE_TURN_ON = 256
 
 # CoverEntityFeature.SET_POSITION
 COVER_SET_POSITION = 4
@@ -72,32 +85,68 @@ def accepts(kind: str, state: Mapping[str, Any] | None) -> bool:
     return state is None or state.get("type") in KIND_STATE_TYPES.get(kind, ())
 
 
-def plan(entity_id: str, current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any]) -> list[Call]:
+def _switch_on(
+    current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any], last_mode: str | None
+) -> Call | None:
+    """The call that puts a thermostat in the right mode, if one is needed.
+
+    Without a chosen mode, a thermostat that is off goes back to its own last mode
+    (turn_on), else to the last one Agenda saw, else to the first usual one: an air
+    conditioner must not start heating in summer.
+    """
+    modes = attributes.get("hvac_modes") or []
+    mode = wanted.get("hvac_mode")
+    if mode:
+        return ("climate", "set_hvac_mode", {"hvac_mode": mode}) if current != mode and mode in modes else None
+    if current != "off":
+        return None
+    if int(attributes.get("supported_features") or 0) & CLIMATE_TURN_ON:
+        return ("climate", "turn_on", {})
+    if last_mode in modes and last_mode != "off":
+        return ("climate", "set_hvac_mode", {"hvac_mode": last_mode})
+    on_mode = next((m for m in ON_HVAC_MODES if m in modes), None)
+    return ("climate", "set_hvac_mode", {"hvac_mode": on_mode}) if on_mode else None
+
+
+def plan(
+    entity_id: str,
+    current: str,
+    attributes: Mapping[str, Any],
+    wanted: Mapping[str, Any],
+    last_mode: str | None = None,
+) -> list[Call]:
     """Return the (domain, service, data) calls that bring the entity to `wanted`.
 
     Calls that would not change anything are skipped, except for thermostats:
     their setpoint is always sent so that a new event overrides manual changes.
+    `last_mode` is the last mode other than off Agenda saw on a thermostat.
     """
     domain = domain_of(entity_id)
     kind = wanted.get("type")
     calls: list[Call] = []
+    if attributes.get("assumed_state") and domain != "climate":
+        # without feedback the state shown is only a guess, it may be wrong: always send
+        current = "unknown"
+        attributes = {k: v for k, v in attributes.items() if k not in ("current_position", "brightness")}
 
     if domain == "climate":
-        modes = attributes.get("hvac_modes") or []
-        on_mode = next((m for m in ON_HVAC_MODES if m in modes), None)
         if kind == "off":
             if current != "off":
                 calls.append(("climate", "set_hvac_mode", {"hvac_mode": "off"}))
-        elif kind == "preset":
-            if current == "off" and on_mode:
-                calls.append(("climate", "set_hvac_mode", {"hvac_mode": on_mode}))
-            calls.append(("climate", "set_preset_mode", {"preset_mode": wanted["preset"]}))
-        elif kind == "temperature":
-            # not through the hvac_mode field of set_temperature: each integration may ignore it,
-            # and Versatile Thermostat does, leaving the thermostat off
-            if current == "off" and on_mode:
-                calls.append(("climate", "set_hvac_mode", {"hvac_mode": on_mode}))
-            calls.append(("climate", "set_temperature", {"temperature": wanted["temperature"]}))
+        elif kind in ("temperature", "preset", "mode"):
+            # the mode by its own call, not through set_temperature: each integration
+            # may ignore that field, and Versatile Thermostat does, leaving the thermostat off
+            switch = _switch_on(current, attributes, wanted, last_mode)
+            if switch:
+                calls.append(switch)
+            for key, service in CLIMATE_SETTINGS.items():
+                value = wanted.get(key)
+                if value is not None and attributes.get(key) != value:
+                    calls.append(("climate", service, {key: value}))
+            if kind == "preset":
+                calls.append(("climate", "set_preset_mode", {"preset_mode": wanted["preset"]}))
+            elif kind == "temperature":
+                calls.append(("climate", "set_temperature", {"temperature": wanted["temperature"]}))
 
     elif domain in KIND_DOMAINS[KIND_ON_OFF]:
         if kind == "off":
@@ -137,6 +186,74 @@ def plan(entity_id: str, current: str, attributes: Mapping[str, Any], wanted: Ma
             calls.append((domain, "set_value", {"value": wanted["value"]}))
 
     return calls
+
+
+def _close(value: Any, target: Any, tolerance: float) -> bool:
+    try:
+        return abs(float(value) - float(target)) <= tolerance + 1e-6
+    except (TypeError, ValueError):
+        return False
+
+
+def unavailable(current: str | None, attributes: Mapping[str, Any]) -> bool:
+    """Whether a device cannot be commanded now. A device with an assumed state (a shutter
+    driven by radio, without feedback) is unknown until its first command: it takes one."""
+    if current is None or current == "unavailable":
+        return True
+    return current == "unknown" and not attributes.get("assumed_state")
+
+
+def moving(entity_id: str, current: str) -> bool:
+    """A cover on its way: too early to tell whether it got there."""
+    return domain_of(entity_id) == "cover" and current in ("opening", "closing")
+
+
+def reached(entity_id: str, current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any]) -> bool:
+    """Whether the entity shows the wanted state. True when this cannot be told."""
+    domain = domain_of(entity_id)
+    kind = wanted.get("type")
+
+    if domain == "climate":
+        if kind == "off":
+            return current == "off"
+        if current == "off" or (wanted.get("hvac_mode") and current != wanted["hvac_mode"]):
+            return False
+        if any(wanted.get(key) is not None and attributes.get(key) != wanted[key] for key in CLIMATE_SETTINGS):
+            return False
+        if kind == "preset":
+            return attributes.get("preset_mode") == wanted["preset"]
+        if kind == "temperature":
+            if not isinstance(attributes.get("temperature"), (int, float)):
+                return True  # a setpoint range: not something Agenda sets
+            # the device may round to its own step
+            step = attributes.get("target_temp_step") or 0.5
+            return _close(attributes["temperature"], wanted["temperature"], step / 2)
+        return True
+
+    if domain in KIND_DOMAINS[KIND_ON_OFF]:
+        if kind == "off":
+            return current == "off"
+        if current != "on":
+            return False
+        brightness = wanted.get("brightness") if domain == "light" else None
+        raw = attributes.get("brightness")
+        if brightness is None or not isinstance(raw, (int, float)):
+            return True
+        return _close(raw * 100 / 255, brightness, 2)
+
+    if domain == "cover" and kind == "position":
+        position = int(wanted["position"])
+        if int(attributes.get("supported_features") or 0) & COVER_SET_POSITION:
+            return _close(attributes.get("current_position"), position, 2)
+        return current == ("open" if position > 0 else "closed")
+
+    if domain in KIND_DOMAINS[KIND_SELECT] and kind == "option":
+        return current == wanted["option"]
+
+    if domain in KIND_DOMAINS[KIND_NUMBER] and kind == "value":
+        return _close(current, wanted["value"], (attributes.get("step") or 0) / 2)
+
+    return True
 
 
 LABELS = {
@@ -194,6 +311,42 @@ LABELS = {
     },
 }
 
+# hvac modes chosen in an event, apart from preset names that could be the same words
+MODE_LABELS = {
+    "fr": {
+        "heat": "Chauffage",
+        "cool": "Clim",
+        "heat_cool": "Auto",
+        "auto": "Auto",
+        "dry": "Déshumidification",
+        "fan_only": "Ventilation",
+    },
+    "en": {
+        "heat": "Heat",
+        "cool": "Cool",
+        "heat_cool": "Auto",
+        "auto": "Auto",
+        "dry": "Dry",
+        "fan_only": "Fan",
+    },
+    "de": {
+        "heat": "Heizen",
+        "cool": "Kühlen",
+        "heat_cool": "Auto",
+        "auto": "Auto",
+        "dry": "Entfeuchten",
+        "fan_only": "Lüften",
+    },
+    "nl": {
+        "heat": "Verwarmen",
+        "cool": "Koelen",
+        "heat_cool": "Auto",
+        "auto": "Auto",
+        "dry": "Drogen",
+        "fan_only": "Ventileren",
+    },
+}
+
 # languages writing decimals with a comma
 DECIMAL_COMMA = ("fr", "de", "nl")
 
@@ -210,10 +363,16 @@ def label(state: Mapping[str, Any] | None, language: str, unit: str | None = Non
         return text.replace(".", ",") if lang in DECIMAL_COMMA else text
 
     kind = state.get("type")
+    mode = state.get("hvac_mode")
+    mode = MODE_LABELS.get(lang, MODE_LABELS["en"]).get(mode, mode) if mode else None
     if kind == "temperature":
-        return f"{number(float(state['temperature']))} °C"
+        text = f"{number(float(state['temperature']))} {unit or '°C'}"
+        return f"{mode} {text}" if mode else text
     if kind == "preset":
-        return words.get(state["preset"], state["preset"])
+        text = words.get(state["preset"], state["preset"])
+        return f"{mode} {text}" if mode else text
+    if kind == "mode":
+        return mode
     if kind == "off":
         return words["off"]
     if kind == "on":

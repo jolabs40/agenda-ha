@@ -7,6 +7,11 @@ end of one event from undoing the next one when they are back to back.
 An event with conditions takes charge (state and start actions) only while they
 hold; its end actions always run. During the absence mode an agenda that follows
 it keeps its away state and runs no action.
+
+A device changed by hand is left alone until the next change of the agenda, the next
+day, or not at all (setting manual_hold). An override puts the state of an event, or
+the next one, ahead of the schedule until a given time. Both are kept across restarts
+in a storage file of their own, which older versions do not read.
 """
 
 from __future__ import annotations
@@ -16,12 +21,13 @@ from collections.abc import Callable
 import copy
 from datetime import date, datetime, time, timedelta
 import logging
+import random
 from typing import Any
 import uuid
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import Context, Event, HomeAssistant, callback
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.core import Context, Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -41,6 +47,7 @@ from .const import (
     CALENDAR_PAST,
     CALENDAR_REFRESH,
     CONDITION_DELAY_S,
+    CONDITION_WAIT,
     DEFAULT_SETTINGS,
     DOMAIN,
     PALETTE,
@@ -48,12 +55,27 @@ from .const import (
     STORAGE_MINOR_VERSION,
     STORAGE_VERSION,
 )
+from .control import Control
 from .migration import migrate
 from .shared import Shared
 
 _LOGGER = logging.getLogger(__name__)
 
-SERVICE_TIMEOUT_S = 30
+RUNTIME_STORAGE_VERSION = 1
+
+# how long a device changed by hand is left alone
+MANUAL_NEXT_CHANGE = "next_change"
+MANUAL_NEXT_DAY = "next_day"
+MANUAL_NEVER = "never"
+# put back at once
+MANUAL_UNDO = "undo"
+MANUAL_HOLDS = (MANUAL_NEXT_CHANGE, MANUAL_NEXT_DAY, MANUAL_NEVER, MANUAL_UNDO)
+
+# states that say nothing about a condition entity
+NO_STATE = ("unavailable", "unknown")
+
+# reasons that take every device back, hand changes included
+TAKE_BACK = ("edit", "enabled", "absence", "override", "resume", "apply")
 
 
 def wall(point: datetime, tz) -> str:
@@ -82,6 +104,12 @@ class Agenda:
             f"{DOMAIN}.{entry.entry_id}",
             minor_version=STORAGE_MINOR_VERSION,
         )
+        self._runtime: Store[dict[str, Any]] = Store(
+            hass, RUNTIME_STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}.runtime"
+        )
+        # state put ahead of the schedule: {"state", "until", "kind", "event_id"}
+        self.override: dict[str, Any] | None = None
+        self._unsub_holds: Callable[[], None] | None = None
         self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
         self.settings["color"] = PALETTE[index % len(PALETTE)]
         self.enabled = True
@@ -89,8 +117,8 @@ class Agenda:
         self.next_change: datetime | None = None
         self._last = dt_util.utcnow()
         self._unsub_timer: Callable[[], None] | None = None
-        self._applied: dict[str, Any] | None = None
-        self._run_lock = asyncio.Lock()
+        self.control = Control(self)
+        self.run_lock = asyncio.Lock()
         # condition calendars: busy local days, and the span they were read for
         self._calendar_days: dict[str, set[date]] = {}
         self._calendar_span: tuple[date, date] | None = None
@@ -99,6 +127,10 @@ class Agenda:
         self._refresh_pending: Callable[[], None] | None = None
         self._unsub_conditions: Callable[[], None] | None = None
         self._condition_pending: Callable[[], None] | None = None
+        # last real state of each condition entity, and since when it has none (None: it has one)
+        self._known: dict[str, tuple[str, datetime | None]] = {}
+        self._unsub_wait: Callable[[], None] | None = None
+        self._unsub_stop: Callable[[], None] | None = None
         self._unsub_absence: Callable[[], None] | None = None
 
     @property
@@ -132,6 +164,8 @@ class Agenda:
         raise KeyError(event_id)
 
     def unit(self) -> str | None:
+        if self.kind == devices.KIND_CLIMATE:
+            return self.hass.config.units.temperature_unit
         for entity_id in self.linked:
             state = self.hass.states.get(entity_id)
             if state and state.attributes.get("unit_of_measurement"):
@@ -154,12 +188,45 @@ class Agenda:
             self.settings.update(data.get("settings") or {})
             self.enabled = data.get("enabled", True)
             self.events = data.get("events") or []
+        runtime = await self._runtime.async_load() or {}
+        now = dt_util.utcnow()
+
+        def moment(text: str | None) -> datetime | None:
+            return dt_util.parse_datetime(text) if text else None
+
+        for entity_id, until in (runtime.get("holds") or {}).items():
+            until = moment(until)
+            if until is None or until > now:
+                self.control.holds[entity_id] = until
+        override = runtime.get("override")
+        if override and (until := moment(override.get("until"))) and until > now:
+            self.override = {**override, "until": until}
+        for entity_id, (state, since) in (runtime.get("conditions") or {}).items():
+            # a state seen until the restart is waited for from now on
+            since = moment(since) or now
+            if now - since < CONDITION_WAIT:
+                self._known[entity_id] = (state, since)
 
     async def async_save(self) -> None:
         await self._store.async_save({"settings": self.settings, "enabled": self.enabled, "events": self.events})
 
+    def _runtime_data(self) -> dict[str, Any]:
+        override = self.override
+        return {
+            "holds": {e: until.isoformat() if until else None for e, until in self.control.holds.items()},
+            "override": {**override, "until": override["until"].isoformat()} if override else None,
+            "conditions": {
+                e: [state, since.isoformat() if since else None] for e, (state, since) in self._known.items()
+            },
+        }
+
+    @callback
+    def _save_runtime(self) -> None:
+        self._runtime.async_delay_save(self._runtime_data, 1)
+
     async def async_remove_storage(self) -> None:
         await self._store.async_remove()
+        await self._runtime.async_remove()
 
     def context(self, extra: dict[str, set[date]] | None = None) -> recurrence.Context:
         days = self._calendar_days
@@ -171,7 +238,19 @@ class Agenda:
             calendar_days=days,
             vacation_days=days.get(school, set()) if school else None,
             sun=self.shared.sun,
+            shift=self._presence_shift,
         )
+
+    def _presence_shift(self, event_id: str, at: datetime, which: str) -> int:
+        """Presence simulation: during an absence, an agenda that keeps its schedule moves its
+        starts and ends by up to presence_jitter minutes. The draw is fixed for an event, a day
+        and a bound, so that the week, the sensors and the timer agree."""
+        jitter = int(self.settings.get("presence_jitter") or 0)
+        if not jitter or self.settings.get("follow_absence", True):
+            return 0
+        if not self.shared.absent_at(dt_util.as_utc(at.replace(tzinfo=self.tz))):
+            return 0
+        return random.Random(f"{event_id}|{at.date()}|{which}").randint(-jitter, jitter)
 
     def occurrences(
         self, start: datetime, end: datetime, ctx: recurrence.Context | None = None
@@ -182,22 +261,32 @@ class Agenda:
         return recurrence.active_at(self.events, self.tz, at or dt_util.utcnow(), self.context())
 
     def conditions_hold(self, event: dict[str, Any]) -> bool:
-        """Whether the event's entity conditions hold now (all of them)."""
-        for cond in event.get("conditions") or []:
-            state = self.hass.states.get(cond["entity_id"])
-            matches = state is not None and state.state == str(cond.get("state", ""))
-            if matches == bool(cond.get("not")):
-                return False
-        return True
+        """Whether the event's entity conditions hold now."""
+        return recurrence.conditions_met(event, self._condition_state)
+
+    def _condition_state(self, entity_id: str) -> str | None:
+        """State of a condition entity. Unavailable or unknown, it keeps its last state for a
+        while: deciding on a sensor that is not back yet would move devices twice."""
+        state = self.hass.states.get(entity_id)
+        if state is not None and state.state not in NO_STATE:
+            return state.state
+        known = self._known.get(entity_id)
+        if known and (known[1] is None or dt_util.utcnow() - known[1] < CONDITION_WAIT):
+            return known[0]
+        return state.state if state else None
 
     def absent(self, at: datetime | None = None) -> bool:
         return bool(self.settings.get("follow_absence", True)) and self.shared.absent_at(at or dt_util.utcnow())
 
-    def desired(self, at: datetime | None = None) -> tuple[dict[str, Any] | None, recurrence.Occurrence | None]:
+    def desired(
+        self, at: datetime | None = None, override: bool = True
+    ) -> tuple[dict[str, Any] | None, recurrence.Occurrence | None]:
         at = at or dt_util.utcnow()
         default = self.settings.get("default_state")
         if self.absent(at):
             return self.settings.get("away_state") or default, None
+        if override and self.override and at < self.override["until"]:
+            return self.override["state"], None
         # conditions are read now: a future state assumes they keep their value
         events = [event for event in self.events if self.conditions_hold(event)]
         return recurrence.desired_state(events, self.tz, at, default, self.context())
@@ -208,15 +297,32 @@ class Agenda:
         self._schedule()
         self._track_calendars()
         self._track_conditions()
+        self.control.track()
+        self._schedule_holds()
         self._unsub_absence = self.shared.async_on_absence_change(self.async_absence_changed)
+        # the last states of the condition entities are written once, when Home Assistant stops
+        self._unsub_stop = self.hass.bus.async_listen(EVENT_HOMEASSISTANT_STOP, self._on_ha_stop)
+
+    @callback
+    def _on_ha_stop(self, _event: Event) -> None:
+        self._runtime.async_delay_save(self._runtime_data, 0)
 
     @callback
     def async_stop(self) -> None:
+        if self._unsub_stop:
+            self._unsub_stop()
+            self._unsub_stop = None
+            if self._known:
+                self._save_runtime()
         if self._unsub_timer:
             self._unsub_timer()
             self._unsub_timer = None
         self._untrack_calendars()
         self._untrack_conditions()
+        self.control.stop()
+        if self._unsub_holds:
+            self._unsub_holds()
+            self._unsub_holds = None
         if self._unsub_absence:
             self._unsub_absence()
             self._unsub_absence = None
@@ -227,6 +333,9 @@ class Agenda:
             self._unsub_timer()
             self._unsub_timer = None
         self.next_change = recurrence.next_transition(self.events, self.tz, self._last, self.context())
+        ends = self.override["until"] if self.override else None
+        if ends is not None and ends > self._last and (self.next_change is None or ends < self.next_change):
+            self.next_change = ends
         if self.next_change is not None:
             self._unsub_timer = async_track_point_in_time(self.hass, self._on_timer, self.next_change)
         until = self.shared.absence_until()
@@ -247,6 +356,10 @@ class Agenda:
         """Handle every start and end in (since, until]."""
         if self.condition_calendars() and not self._calendars_ready:
             await self.async_refresh_calendars(apply=False)
+        expired = self.override is not None and self.override["until"] <= until
+        if expired:
+            self.override = None
+            self._save_runtime()
         occs = self.occurrences(since, until + timedelta(seconds=1))
         ended = sorted((o for o in occs if since < o.end <= until), key=lambda o: o.end)
         started = sorted(
@@ -254,15 +367,15 @@ class Agenda:
             key=lambda o: o.start,
         )
         self._notify()
-        if not self.enabled or self.absent() or not (ended or started):
+        if not self.enabled or self.absent() or not (ended or started or expired):
             return
-        async with self._run_lock:
+        async with self.run_lock:
             for occ in ended:
                 await self._async_run_actions(occ, "end")
             if self.linked:
                 # resend the state when an event starts, to override manual changes
-                force = any(self.event(o.event_id).get("state") for o in started)
-                await self.async_apply_state(force=force)
+                force = expired or any(self.event(o.event_id).get("state") for o in started)
+                await self.async_apply_state(force=force, reason="schedule")
             for occ in started:
                 await self._async_run_actions(occ, "start")
 
@@ -298,43 +411,162 @@ class Agenda:
         except Exception:  # one broken action must not stop the others
             _LOGGER.exception("Agenda %s: %s actions of '%s' failed", self.name, phase, self.label(event))
 
-    async def async_apply_state(self, force: bool = False) -> None:
-        """Apply the current wanted state to the linked entities."""
+    async def async_apply_state(self, force: bool = False, reason: str = "change") -> None:
+        """Apply the current wanted state to the linked entities.
+
+        Without force, only to the devices that did not get it yet. Devices changed by
+        hand are skipped, unless the reason takes every device back.
+        """
+        if reason in TAKE_BACK and self.control.holds:
+            self.control.holds.clear()
+            self._save_runtime()
+            self._schedule_holds()
         if not self.linked or not self.enabled:
             return
-        wanted, _ = self.desired()
-        if wanted is None or (not force and wanted == self._applied):
+        wanted, occ = self.desired()
+        if wanted is None:
             return
         if not devices.accepts(self.kind, wanted):
             _LOGGER.warning("Agenda %s: state %s does not fit kind %s", self.name, wanted, self.kind)
             return
-        self._applied = copy.deepcopy(wanted)
         for entity_id in self.linked:
-            await self._async_apply_to(entity_id, wanted)
+            if self.control.held(entity_id):
+                continue
+            if force or self.control.applied.get(entity_id) != wanted:
+                await self.control.async_apply(entity_id, wanted, reason, occ)
 
-    async def _async_apply_to(self, entity_id: str, wanted: dict[str, Any]) -> None:
-        state = self.hass.states.get(entity_id)
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            _LOGGER.warning("Agenda %s: %s is not available", self.name, entity_id)
+    @callback
+    def manual_change(self, entity_id: str) -> None:
+        """Someone else changed a device: leave it alone for a while, as set, or put it back."""
+        mode = self.settings.get("manual_hold", MANUAL_NEXT_CHANGE)
+        if mode == MANUAL_NEVER or not self.enabled:
             return
-        for domain, service, data in devices.plan(entity_id, state.state, state.attributes, wanted):
-            try:
-                async with asyncio.timeout(SERVICE_TIMEOUT_S):
-                    await self.hass.services.async_call(
-                        domain, service, {"entity_id": entity_id, **data}, blocking=True
-                    )
-                _LOGGER.debug("Agenda %s: %s.%s %s %s", self.name, domain, service, entity_id, data)
-            except (HomeAssistantError, TimeoutError, ValueError) as err:
-                _LOGGER.error("Agenda %s: %s refused %s.%s %s: %s", self.name, entity_id, domain, service, data, err)
+        if mode == MANUAL_UNDO:
+            if self.control.undo(entity_id):
                 return
+            # something keeps setting it otherwise: no fight
+            _LOGGER.warning("Agenda %s: %s keeps being changed, left alone until the next change", self.name, entity_id)
+            mode = MANUAL_NEXT_CHANGE
+        if mode == MANUAL_NEXT_DAY:
+            until = dt_util.start_of_local_day(dt_util.now() + timedelta(days=1))
+        else:
+            until = self.next_change
+        self.control.holds[entity_id] = dt_util.as_utc(until) if until else None
+        _LOGGER.info("Agenda %s: %s changed by hand, left alone until %s", self.name, entity_id, until or "resumed")
+        self._save_runtime()
+        self._schedule_holds()
+        self._notify()
+
+    @callback
+    def manual_end(self, entity_id: str) -> None:
+        """A device changed by hand is back to the agenda's state."""
+        if entity_id in self.control.holds:
+            del self.control.holds[entity_id]
+            self._save_runtime()
+            self._schedule_holds()
+            self._notify()
+
+    @callback
+    def _schedule_holds(self) -> None:
+        if self._unsub_holds:
+            self._unsub_holds()
+            self._unsub_holds = None
+        ends = [until for until in self.control.holds.values() if until is not None]
+        if ends:
+            self._unsub_holds = async_track_point_in_time(self.hass, self._on_holds_end, min(ends))
+
+    @callback
+    def _on_holds_end(self, _now: datetime) -> None:
+        self._unsub_holds = None
+        self.hass.async_create_background_task(self._async_holds_end(), f"{DOMAIN} {self.name} hand changes")
+
+    async def _async_holds_end(self) -> None:
+        """Devices left alone long enough get the agenda's state back."""
+        now = dt_util.utcnow()
+        ended = [e for e, until in self.control.holds.items() if until is not None and until <= now]
+        for entity_id in ended:
+            del self.control.holds[entity_id]
+        self._save_runtime()
+        self._schedule_holds()
+        async with self.run_lock:
+            wanted, occ = self.desired()
+            if self.enabled and wanted is not None and devices.accepts(self.kind, wanted):
+                for entity_id in ended:
+                    state = self.hass.states.get(entity_id)
+                    # a transition at the same time may have done it already
+                    if entity_id in self.linked and not (
+                        state and devices.reached(entity_id, state.state, state.attributes, wanted)
+                    ):
+                        await self.control.async_apply(entity_id, wanted, "manual_end", occ)
+        self._notify()
+
+    async def _async_overridden(self) -> None:
+        self._save_runtime()
+        self._last = dt_util.utcnow()
+        self._schedule()
+        async with self.run_lock:
+            await self.async_apply_state(force=True, reason="override")
+        self._notify()
+
+    async def async_advance(self) -> None:
+        """Put the next state of the schedule ahead of it, until its time comes."""
+        start = dt_util.utcnow()
+        if self.override and self.override["until"] > start:
+            start = self.override["until"]
+        nxt = recurrence.next_transition(self.events, self.tz, start, self.context())
+        state = self.desired(nxt, override=False)[0] if nxt else None
+        if nxt is None or state is None:
+            raise HomeAssistantError(f"nothing comes next in agenda {self.name}")
+        self.override = {"state": copy.deepcopy(state), "until": nxt, "kind": "next", "event_id": None}
+        await self._async_overridden()
+
+    async def async_apply_event(self, event_id: str, state: dict[str, Any] | None = None) -> None:
+        """Put the state of an event (or the one given) ahead of the schedule, until its
+        next occurrence ends."""
+        event = self.event(event_id)
+        state = state or event.get("state")
+        if not state:
+            raise HomeAssistantError(f"event '{self.label(event)}' has no state")
+        if not devices.accepts(self.kind, state):
+            raise HomeAssistantError(f"state {state} does not fit an agenda of kind {self.kind}")
+        now = dt_util.utcnow()
+        occs = [o for o in self.occurrences(now, now + timedelta(days=400)) if o.event_id == event_id and o.end > now]
+        if not occs:
+            raise HomeAssistantError(f"event '{self.label(event)}' does not come again")
+        until = min(occs, key=lambda o: o.start).end
+        self.override = {"state": copy.deepcopy(state), "until": until, "kind": "event", "event_id": event_id}
+        await self._async_overridden()
+
+    async def async_apply_named(self, name: str) -> None:
+        """The event of that name with a state that comes first, as for apply_event."""
+        ids = {event["id"] for event in self._named(name) if event.get("state")}
+        now = dt_util.utcnow()
+        occs = [o for o in self.occurrences(now, now + timedelta(days=400)) if o.event_id in ids and o.end > now]
+        if not occs:
+            raise HomeAssistantError(f"no event named '{name}' with a state comes again in agenda {self.name}")
+        await self.async_apply_event(min(occs, key=lambda o: o.start).event_id)
+
+    async def async_resume(self) -> None:
+        """Back to the schedule: no override, no device left alone."""
+        self.override = None
+        self._save_runtime()
+        self._last = dt_util.utcnow()
+        self._schedule()
+        async with self.run_lock:
+            await self.async_apply_state(force=True, reason="resume")
+        self._notify()
+
+    def condition_keys(self) -> set[str]:
+        """Keys of the busy days to read: by calendar, or by calendar and text."""
+        keys = set().union(*(recurrence.condition_keys(event) for event in self.events))
+        school = self.shared.school_calendar
+        if school and school in self.condition_calendars():
+            keys.add(school)
+        return keys
 
     def condition_calendars(self) -> set[str]:
         calendars = {
-            calendar
-            for event in self.events
-            for key in ("calendars", "except_calendars")
-            for calendar in (event.get("repeat") or {}).get(key) or ()
-            if calendar != recurrence.HOLIDAYS_CALENDAR
+            recurrence.text_of_key(key)[0] for event in self.events for key in recurrence.condition_keys(event)
         }
         school = self.shared.school_calendar
         if school and any(
@@ -381,21 +613,23 @@ class Agenda:
         self._refresh_pending = None
         self.hass.async_create_background_task(self.async_refresh_calendars(), f"{DOMAIN} {self.name} calendars")
 
-    async def _async_calendar_days(
-        self, calendars: set[str], start: date, end: date
-    ) -> tuple[dict[str, set[date]], bool]:
-        """Busy days per calendar over [start, end), and whether all could be read.
-
-        A calendar entity may not exist yet during startup.
+    async def _async_calendar_days(self, keys: set[str], start: date, end: date) -> tuple[dict[str, set[date]], bool]:
+        """Busy days per key (calendar, or calendar and text) over [start, end), and whether
+        all could be read. Each calendar is read once. A calendar entity may not exist yet
+        during startup.
         """
         tz = self.tz
         start_dt = datetime.combine(start, time.min, tz)
         end_dt = datetime.combine(end, time.min, tz)
         found: dict[str, set[date]] = {}
         complete = True
-        for entity_id in sorted(calendars):
+        by_calendar: dict[str, list[str]] = {}
+        for key in sorted(keys):
+            by_calendar.setdefault(recurrence.text_of_key(key)[0], []).append(key)
+        for entity_id, entity_keys in by_calendar.items():
             if self.hass.states.get(entity_id) is None:
-                found[entity_id] = self._calendar_days.get(entity_id, set())
+                for key in entity_keys:
+                    found[key] = self._calendar_days.get(key, set())
                 complete = False
                 continue
             try:
@@ -412,15 +646,20 @@ class Agenda:
                 )
             except (HomeAssistantError, ValueError) as err:
                 _LOGGER.warning("Agenda %s: cannot read %s: %s", self.name, entity_id, err)
-                found[entity_id] = self._calendar_days.get(entity_id, set())
+                for key in entity_keys:
+                    found[key] = self._calendar_days.get(key, set())
                 complete = False
                 continue
             events = ((response or {}).get(entity_id) or {}).get("events") or []
-            found[entity_id] = recurrence.calendar_days(((str(e["start"]), str(e["end"])) for e in events), tz)
+            for key in entity_keys:
+                text = recurrence.text_of_key(key)[1]
+                found[key] = recurrence.calendar_days(
+                    ((str(e["start"]), str(e["end"])) for e in events if recurrence.event_has_text(e, text)), tz
+                )
         return found, complete
 
     async def async_refresh_calendars(self, apply: bool = True) -> None:
-        calendars = self.condition_calendars()
+        calendars = self.condition_keys()
         today = dt_util.now().date()
         start, end = today - CALENDAR_PAST, today + CALENDAR_FUTURE
         days: dict[str, set[date]] = {}
@@ -436,13 +675,13 @@ class Agenda:
         self._schedule()
         after, _ = self.desired()
         if apply and after != before:
-            async with self._run_lock:
-                await self.async_apply_state(force=True)
+            async with self.run_lock:
+                await self.async_apply_state(force=True, reason="calendar")
         self._notify()
 
     async def async_context_for(self, start: datetime, end: datetime) -> recurrence.Context:
         """Context for [start, end), reading calendars outside the cached span."""
-        calendars = self.condition_calendars()
+        calendars = self.condition_keys()
         span = self._calendar_span
         first, last = start.astimezone(self.tz).date(), end.astimezone(self.tz).date()
         if not calendars or (span and span[0] <= first and last <= span[1]):
@@ -453,7 +692,7 @@ class Agenda:
     async def _async_changed(self, before: dict[str, Any] | None) -> None:
         """Persist, reschedule, and apply the state if the change affects it."""
         await self.async_save()
-        if self.condition_calendars() != set(self._calendar_days):
+        if self.condition_keys() != set(self._calendar_days):
             # a new condition calendar must be read before deciding anything
             self._track_calendars(refresh=False)
             await self.async_refresh_calendars(apply=False)
@@ -462,8 +701,8 @@ class Agenda:
         self._schedule()
         after, _ = self.desired()
         if after != before:
-            async with self._run_lock:
-                await self.async_apply_state(force=True)
+            async with self.run_lock:
+                await self.async_apply_state(force=True, reason="edit")
         self._notify()
         self._refresh_dependents()
 
@@ -547,25 +786,39 @@ class Agenda:
         self.settings.update(settings)
         if name and name != self.entry.title:
             self.hass.config_entries.async_update_entry(self.entry, title=name)
+        if settings.get("presence_jitter") == 0:
+            # off is not stored either
+            del settings["presence_jitter"]
+            self.settings.pop("presence_jitter", None)
+        if settings.get("manual_hold") == MANUAL_NEXT_CHANGE:
+            # the default is not stored: older versions refuse unknown settings
+            del settings["manual_hold"]
+            self.settings.pop("manual_hold", None)
+        if settings.get("manual_hold") in (MANUAL_NEVER, MANUAL_UNDO) and self.control.holds:
+            self.control.holds.clear()
+            self._save_runtime()
+            self._schedule_holds()
         if self.linked != old_entities:
+            self.control.track()
             before = {"force": True}  # newly linked entities must get the state
         if not apply:
-            self._applied, _ = self.desired()
             before, _ = self.desired()
+            self.control.assume(before)
         await self._async_changed(before)
 
     async def async_set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
         await self.async_save()
         if enabled:
-            async with self._run_lock:
-                await self.async_apply_state(force=True)
+            async with self.run_lock:
+                await self.async_apply_state(force=True, reason="enabled")
         self._notify()
 
-    async def async_resync(self) -> None:
-        """Re-apply the wanted state (startup, resync action)."""
-        async with self._run_lock:
-            await self.async_apply_state(force=True)
+    async def async_resync(self, take_back: bool = False) -> None:
+        """Re-apply the wanted state. At startup and from the resync action, devices set by
+        hand are left alone; from the panel's button (take_back), they are taken back too."""
+        async with self.run_lock:
+            await self.async_apply_state(force=True, reason="apply" if take_back else "resync")
         self._notify()
 
     def condition_entities(self) -> set[str]:
@@ -575,6 +828,10 @@ class Agenda:
     def _track_conditions(self) -> None:
         self._untrack_conditions()
         entities = self.condition_entities()
+        self._known = {e: known for e, known in self._known.items() if e in entities}
+        for entity_id in entities:
+            self._remember(entity_id, self.hass.states.get(entity_id))
+        self._schedule_wait()
         if entities:
             self._unsub_conditions = async_track_state_change_event(
                 self.hass, sorted(entities), self._on_condition_change
@@ -588,9 +845,42 @@ class Agenda:
         if self._condition_pending:
             self._condition_pending()
             self._condition_pending = None
+        if self._unsub_wait:
+            self._unsub_wait()
+            self._unsub_wait = None
+
+    def _remember(self, entity_id: str, state: State | None) -> None:
+        if state is not None and state.state not in NO_STATE:
+            self._known[entity_id] = (state.state, None)
+        elif (known := self._known.get(entity_id)) and known[1] is None:
+            self._known[entity_id] = (known[0], dt_util.utcnow())
 
     @callback
-    def _on_condition_change(self, _event: Event) -> None:
+    def _schedule_wait(self) -> None:
+        """Decide again when a condition entity has been without a state for too long."""
+        if self._unsub_wait:
+            self._unsub_wait()
+            self._unsub_wait = None
+        ends = [since + CONDITION_WAIT for _, since in self._known.values() if since is not None]
+        if ends:
+            self._unsub_wait = async_track_point_in_time(self.hass, self._on_wait_end, min(ends))
+
+    @callback
+    def _on_wait_end(self, _now: datetime) -> None:
+        self._unsub_wait = None
+        now = dt_util.utcnow()
+        self._known = {
+            e: (state, since)
+            for e, (state, since) in self._known.items()
+            if since is None or now - since < CONDITION_WAIT
+        }
+        self._schedule_wait()
+        self.hass.async_create_background_task(self._async_reapply(), f"{DOMAIN} {self.name} condition")
+
+    @callback
+    def _on_condition_change(self, event: Event) -> None:
+        self._remember(event.data["entity_id"], event.data.get("new_state"))
+        self._schedule_wait()
         if self._condition_pending:
             self._condition_pending()
         self._condition_pending = async_call_later(self.hass, CONDITION_DELAY_S, self._on_condition_settled)
@@ -601,16 +891,16 @@ class Agenda:
         self.hass.async_create_background_task(self._async_reapply(), f"{DOMAIN} {self.name} condition")
 
     async def _async_reapply(self) -> None:
-        async with self._run_lock:
-            await self.async_apply_state()
+        async with self.run_lock:
+            await self.async_apply_state(reason="condition")
         self._notify()
 
     async def async_absence_changed(self) -> None:
         """The absence mode started or ended: reschedule and apply the state."""
         self._last = dt_util.utcnow()
         self._schedule()
-        async with self._run_lock:
-            await self.async_apply_state(force=True)
+        async with self.run_lock:
+            await self.async_apply_state(force=True, reason="absence")
         self._notify()
 
     def _named(self, name: str | None) -> list[dict[str, Any]]:
@@ -651,14 +941,14 @@ class Agenda:
     async def async_context_changed(self) -> None:
         """Reschedule after the shared settings changed."""
         before, _ = self.desired()
-        if self.condition_calendars() != set(self._calendar_days):
+        if self.condition_keys() != set(self._calendar_days):
             self._track_calendars(refresh=False)
         await self.async_refresh_calendars(apply=False)
         self._schedule()
         after, _ = self.desired()
         if after != before:
-            async with self._run_lock:
-                await self.async_apply_state(force=True)
+            async with self.run_lock:
+                await self.async_apply_state(force=True, reason="settings")
         self._notify()
 
     @callback
@@ -701,6 +991,17 @@ class Agenda:
             "state_event": occ.event_id if occ else None,
             "absent": self.absent(now),
             "agenda_entities": self.agenda_entities(),
+            "override": (
+                {**self.override, "until": wall(self.override["until"], self.tz)}
+                if self.override and self.override["until"] > now
+                else None
+            ),
+            # devices changed by hand and left alone: until when, None until resumed
+            "holds": {
+                entity_id: wall(until, self.tz) if until else None
+                for entity_id, until in self.control.holds.items()
+                if self.control.held(entity_id, now)
+            },
         }
 
     def _occ_dict(self, occ: recurrence.Occurrence) -> dict[str, Any]:

@@ -49,6 +49,30 @@ remove_dates:
       selector:
         object:
 
+advance:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
+
+apply_event:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
+  fields:
+    event:
+      required: true
+      example: Evening
+      selector:
+        text:
+
+resume:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
+
 set_absence:
   fields:
     until:

@@ -21,7 +21,24 @@ export function esc(value) {
 }
 
 export function friendlyName(hass, entityId) {
-  return hass?.states?.[entityId]?.attributes?.friendly_name || entityId;
+  const state = hass?.states?.[entityId];
+  if (!state) return entityId;
+  try {
+    // the name Home Assistant's own cards show (2026.4 and later)
+    return hass.formatEntityName?.(state) || state.attributes.friendly_name || entityId;
+  } catch (_err) {
+    return state.attributes.friendly_name || entityId;
+  }
+}
+
+/** The area of an entity, as Home Assistant names it; empty when unknown. */
+export function areaName(hass, entityId) {
+  const state = hass?.states?.[entityId];
+  try {
+    return (state && hass.formatEntityName?.(state, [{ type: "area" }])) || "";
+  } catch (_err) {
+    return "";
+  }
 }
 
 // in a list of condition calendars, the public holidays
@@ -62,6 +79,11 @@ export const mondayOf = (m) => dayOf(m) - weekday(m) * DAY;
 
 /** Wall minutes "now" in Home Assistant's time zone. */
 export function nowWall(timeZone) {
+  return wallAt(new Date(), timeZone);
+}
+
+/** Wall minutes of a moment in Home Assistant's time zone. */
+export function wallAt(moment, timeZone) {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {
       timeZone,
@@ -72,10 +94,89 @@ export function nowWall(timeZone) {
       minute: "2-digit",
       hourCycle: "h23",
     })
-      .formatToParts(new Date())
+      .formatToParts(moment)
       .map((p) => [p.type, p.value]),
   );
   return wm(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`);
+}
+
+/** The moment (ms since the epoch) of wall minutes in Home Assistant's time zone. */
+export function epochOf(m, timeZone) {
+  let guess = m * 60000;
+  for (let i = 0; i < 2; i++) guess -= (wallAt(new Date(guess), timeZone) - m) * 60000;
+  return guess;
+}
+
+/** Measured temperature and setpoint of the first thermostat of each agenda over a day,
+ *  from the recorder: {entity_id: [[wall minute, measured, setpoint or null when off], ...]}.
+ *  call: a websocket call. */
+export async function climateHistory(call, agendas, day, timeZone) {
+  const ids = [
+    ...new Set(agendas.filter((a) => a.settings.kind === "climate").map((a) => (a.settings.entities || [])[0])),
+  ].filter(Boolean);
+  if (!ids.length) return {};
+  const res = await call({
+    type: "history/history_during_period",
+    start_time: new Date(epochOf(day, timeZone)).toISOString(),
+    end_time: new Date(epochOf(day + DAY, timeZone)).toISOString(),
+    entity_ids: ids,
+    minimal_response: false,
+    no_attributes: false,
+    significant_changes_only: false,
+  });
+  const out = {};
+  for (const id of ids) {
+    let attrs = {};
+    out[id] = (res?.[id] || []).map((row) => {
+      if (row.a) attrs = row.a;
+      const on = !["off", "unavailable", "unknown"].includes(row.s);
+      return [wallAt(new Date(row.lu * 1000), timeZone), attrs.current_temperature, on ? attrs.temperature : null];
+    });
+  }
+  return out;
+}
+
+const CALENDAR_COLORS = ["#7986cb", "#4db6ac", "#f06292", "#9575cd", "#4fc3f7", "#aed581", "#ffb74d", "#a1887f"];
+
+/** A colour of its own for a calendar that is not an agenda. */
+export function calendarColor(id) {
+  const h = [...String(id)].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return CALENDAR_COLORS[h % CALENDAR_COLORS.length];
+}
+
+/** Events of calendars that are not agendas over [start, end) (wall minutes), shown for
+ *  information: {entity_id: [{start, end, all_day, summary, description, location}]}. */
+export async function calendarEvents(hass, ids, start, end, timeZone) {
+  const from = encodeURIComponent(new Date(epochOf(start, timeZone)).toISOString());
+  const to = encodeURIComponent(new Date(epochOf(end, timeZone)).toISOString());
+  const edge = (v) => {
+    if (v?.dateTime) return wallAt(new Date(v.dateTime), timeZone);
+    return v?.date ? wm(v.date) : null;
+  };
+  const out = {};
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const list = await hass.callApi("GET", `calendars/${id}?start=${from}&end=${to}`);
+        out[id] = list
+          .map((ev) => ({ ev, s: edge(ev.start), e: edge(ev.end), allDay: Boolean(ev.start?.date) }))
+          .filter((x) => x.s != null && x.e != null)
+          .map(({ ev, s, e, allDay }) => ({
+            start: wall(s),
+            // a reminder without duration still needs a little room
+            end: wall(Math.max(e, s + (allDay ? DAY : 15))),
+            all_day: allDay,
+            summary: ev.summary || "",
+            description: ev.description || "",
+            location: ev.location || "",
+          }));
+      } catch (_err) {
+        // a calendar that cannot be read shows nothing
+        out[id] = [];
+      }
+    }),
+  );
+  return out;
 }
 
 export function fmtDay(m, lang, opts = { weekday: "short", day: "numeric" }) {
@@ -229,7 +330,8 @@ export function repeatSummary(event, T, hass) {
   if (r.holidays === "exclude") extra.push(T.except_holidays);
   if (r.holidays === "only") extra.push(T.only_holidays);
   const calendarList = (ids, match) => {
-    const names = ids.map((id) => calendarName(hass, id, T));
+    const texts = r.calendar_texts || {};
+    const names = ids.map((id) => `${calendarName(hass, id, T)}${texts[id] ? ` (${texts[id]})` : ""}`);
     const last = names.pop();
     const word = match === "all" ? T.list_and : T.list_or;
     return names.length ? `${names.join(", ")} ${word} ${last}` : last;
@@ -258,11 +360,14 @@ export function monthlyLabel(start, mode, T) {
   return T.monthly_modes.day(d);
 }
 
-/** "coucher du soleil - 15 min" */
+/** "coucher du soleil - 15 min, pas avant 17:00" */
 export function sunLabel(anchor, T) {
   const off = Number(anchor.offset) || 0;
   const name = T.sun_short[anchor.event] || anchor.event;
-  return off ? `${name} ${off > 0 ? "+" : "-"} ${Math.abs(off)} min` : name;
+  const parts = [off ? `${name} ${off > 0 ? "+" : "-"} ${Math.abs(off)} min` : name];
+  if (anchor.not_before) parts.push(`${T.not_before.toLowerCase()} ${anchor.not_before}`);
+  if (anchor.not_after) parts.push(`${T.not_after.toLowerCase()} ${anchor.not_after}`);
+  return parts.join(", ");
 }
 
 export function timeSummary(event, T) {
@@ -277,6 +382,20 @@ export function timeSummary(event, T) {
 
 /** ha-selector is lazy-loaded by the frontend; opening a card editor pulls it in. */
 let haLoading = null;
+/** What takes an agenda off its schedule now: an override, devices set by hand.
+ *  `at` formats a wall time. */
+export function offSchedule(agenda, T, at) {
+  const parts = [];
+  if (agenda.override) parts.push(T.override_until(at(agenda.override.until)));
+  const ends = Object.values(agenda.holds || {});
+  if (ends.length) {
+    if (ends.length < (agenda.settings.entities || []).length) parts.push(T.by_hand_n(ends.length));
+    else if (ends[0] && ends.every((u) => u === ends[0])) parts.push(T.by_hand_until(at(ends[0])));
+    else parts.push(T.by_hand);
+  }
+  return parts;
+}
+
 export function loadHaComponents() {
   if (customElements.get("ha-selector")) return Promise.resolve(true);
   if (!haLoading) {

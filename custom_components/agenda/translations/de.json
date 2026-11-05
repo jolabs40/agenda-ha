@@ -87,6 +87,30 @@
     "end_absence": {
       "name": "Abwesenheitsmodus beenden",
       "description": "Die Agenden folgen wieder ihrem Programm."
+    },
+    "advance": {
+      "name": "Zum nächsten Zustand springen",
+      "description": "Setzt jetzt den Zustand des nächsten Wechsels der Agenda, bis dessen Zeit kommt."
+    },
+    "apply_event": {
+      "name": "Termin jetzt anwenden",
+      "description": "Setzt jetzt den Zustand eines Termins, bis sein nächstes Vorkommen endet.",
+      "fields": {
+        "event": {
+          "name": "Termin",
+          "description": "Name des Termins (der nächste)."
+        }
+      }
+    },
+    "resume": {
+      "name": "Zeitplan fortsetzen",
+      "description": "Beendet die Abweichung und übernimmt die von Hand geänderten Geräte wieder."
+    }
+  },
+  "issues": {
+    "not_applied": {
+      "title": "{entity} folgt der Agenda {agenda} nicht",
+      "description": "Agenda hat {state} zweimal an {entity} gesendet, und das Gerät zeigt weiterhin etwas anderes. Prüfen Sie, ob es erreichbar ist und diesen Zustand annimmt (Grenzen, Modi). Dieser Hinweis verschwindet, sobald das Gerät der Agenda wieder folgt."
     }
   }
 }

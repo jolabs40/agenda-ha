@@ -41,8 +41,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Set
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
+import unicodedata
 
 FREQ_NONE = "none"
 FREQ_DAILY = "daily"
@@ -95,6 +96,10 @@ def _no_sun(_day: date, _event: str) -> datetime | None:
     return None
 
 
+def _no_shift(_event_id: str, _at: datetime, _which: str) -> int:
+    return 0
+
+
 @dataclass(frozen=True)
 class Context:
     """External facts the engine depends on."""
@@ -106,6 +111,9 @@ class Context:
     vacation_days: Set[date] | None = None
     # naive local time of sunrise or sunset on a day; None keeps the stored time
     sun: Callable[[date, str], datetime | None] = _no_sun
+    # minutes to move a start or an end by (presence simulation), from the event id,
+    # the naive local time and "start" or "end"
+    shift: Callable[[str, datetime, str], int] = _no_shift
 
 
 NO_CONTEXT = Context()
@@ -190,6 +198,9 @@ def validate_event(event: dict[str, Any]) -> None:
             raise ValueError(f"unknown sun event: {anchor.get('event')}")
         if abs(int(anchor.get("offset", 0))) > MAX_SUN_OFFSET:
             raise ValueError("the sun offset is limited to 12 hours")
+        low, high = anchor.get("not_before"), anchor.get("not_after")
+        if low and high and time.fromisoformat(low) > time.fromisoformat(high):
+            raise ValueError("'not before' comes after 'at the latest'")
     for key in ("exclude", "include"):
         for day in repeat.get(key) or []:
             date.fromisoformat(day)
@@ -210,11 +221,37 @@ def _same_day_of_month(day: date, first: date, mode: str) -> bool:
     return day.day == first.day
 
 
+def condition_met(cond: Mapping[str, Any], state: str | None) -> bool:
+    """One entity condition, against the entity's state (None when it does not exist).
+
+    A number above and/or below bounds, or a state that is (or, with not, is not) the given one.
+    """
+    if cond.get("above") is not None or cond.get("below") is not None:
+        try:
+            value = float(state)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+        above, below = cond.get("above"), cond.get("below")
+        return (above is None or value > float(above)) and (below is None or value < float(below))
+    matches = state is not None and state == str(cond.get("state", ""))
+    return matches != bool(cond.get("not"))
+
+
+def conditions_met(event: Mapping[str, Any], state_of: Callable[[str], str | None]) -> bool:
+    """Whether an event's entity conditions hold: all of them, or at least one with match any."""
+    conds = event.get("conditions") or []
+    if not conds:
+        return True
+    results = (condition_met(cond, state_of(cond["entity_id"])) for cond in conds)
+    return any(results) if event.get("conditions_match") == "any" else all(results)
+
+
 def wall_bounds(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> tuple[datetime, datetime] | None:
     """Naive local start and end of the occurrence starting on `day`.
 
-    Sun anchors replace the time of day; when they bring the end before the start
-    (sunset after the fixed end in summer) there is no occurrence that day.
+    Sun anchors replace the time of day, kept between their optional clock bounds
+    (not_before, not_after); when they bring the end before the start (sunset after
+    the fixed end in summer) there is no occurrence that day.
     """
     first, duration = bounds(event)
     last = first + duration
@@ -230,19 +267,63 @@ def wall_bounds(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> 
         if sun is None:
             continue
         point = sun + timedelta(minutes=int(anchor.get("offset", 0)))
+        if anchor.get("not_before"):
+            point = max(point, datetime.combine(on, time.fromisoformat(anchor["not_before"])))
+        if anchor.get("not_after"):
+            point = min(point, datetime.combine(on, time.fromisoformat(anchor["not_after"])))
         if which == "start":
             start = point
         else:
             end = point
+    if not event.get("all_day"):
+        event_id = event.get("id") or ""
+        start += timedelta(minutes=ctx.shift(event_id, start, "start"))
+        end += timedelta(minutes=ctx.shift(event_id, end, "end"))
     if end <= start:
         return None
     return start, end
 
 
-def _busy(day: date, ctx: Context, calendars: Iterable[str], match: str) -> bool:
-    """Whether the day has an event in one of the calendars, or in each of them."""
+def fold(text: str) -> str:
+    """Text compared without case nor accents: conge finds Congé, an emoji stays itself."""
+    return "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c)).casefold().strip()
+
+
+def calendar_key(calendar: str, text: str | None = None) -> str:
+    """Where the busy days of a condition calendar are kept: by entity, or by entity and the
+    text its events must contain (calendar_texts of the repetition)."""
+    text = fold(text or "")
+    return f"{calendar}#{text}" if text else calendar
+
+
+def text_of_key(key: str) -> tuple[str, str | None]:
+    """The calendar entity and the text of a key from calendar_key."""
+    calendar, _, text = key.partition("#")
+    return calendar, text or None
+
+
+def condition_keys(event: Mapping[str, Any]) -> set[str]:
+    """Keys of the condition calendars of an event, public holidays left out."""
+    repeat = event.get("repeat") or {}
+    texts = repeat.get("calendar_texts") or {}
+    return {
+        calendar_key(calendar, texts.get(calendar))
+        for key in ("calendars", "except_calendars")
+        for calendar in repeat.get(key) or ()
+        if calendar != HOLIDAYS_CALENDAR
+    }
+
+
+def _busy(
+    day: date, ctx: Context, calendars: Iterable[str], match: str, texts: Mapping[str, str] | None = None
+) -> bool:
+    """Whether the day has an event in one of the calendars, or in each of them; with texts,
+    only events containing the calendar's text count."""
+    texts = texts or {}
     busy = [
-        ctx.is_holiday(day) if calendar == HOLIDAYS_CALENDAR else day in ctx.calendar_days.get(calendar, ())
+        ctx.is_holiday(day)
+        if calendar == HOLIDAYS_CALENDAR
+        else day in ctx.calendar_days.get(calendar_key(calendar, texts.get(calendar)), ())
         for calendar in calendars
     ]
     return all(busy) if match == CALENDAR_ALL else any(busy)
@@ -299,12 +380,13 @@ def _by_rule(event: dict[str, Any], day: date, ctx: Context) -> bool:
 def _calendar_skip(repeat: dict[str, Any], day: date, ctx: Context) -> str | None:
     """The calendar list that leaves the day out: CALENDAR_ONLY, CALENDAR_EXCLUDE, or None."""
     calendars = repeat.get("calendars")
+    texts = repeat.get("calendar_texts")
     if calendars:
         only = repeat.get("calendar_mode", CALENDAR_EXCLUDE) == CALENDAR_ONLY
-        if _busy(day, ctx, calendars, repeat.get("calendar_match", CALENDAR_ANY)) != only:
+        if _busy(day, ctx, calendars, repeat.get("calendar_match", CALENDAR_ANY), texts) != only:
             return CALENDAR_ONLY if only else CALENDAR_EXCLUDE
     excluded = repeat.get("except_calendars")
-    if excluded and _busy(day, ctx, excluded, repeat.get("except_match", CALENDAR_ANY)):
+    if excluded and _busy(day, ctx, excluded, repeat.get("except_match", CALENDAR_ANY), texts):
         return CALENDAR_EXCLUDE
     return None
 
@@ -330,7 +412,7 @@ def busy_calendars(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) 
         calendar
         for key in ("calendars", "except_calendars")
         for calendar in repeat.get(key) or ()
-        if _busy(day, ctx, (calendar,), CALENDAR_ANY)
+        if _busy(day, ctx, (calendar,), CALENDAR_ANY, repeat.get("calendar_texts"))
     ]
 
 
@@ -455,6 +537,14 @@ def desired_state(
     if occ is None:
         return default, None
     return by_id[occ.event_id]["state"], occ
+
+
+def event_has_text(event: Mapping[str, Any], text: str | None) -> bool:
+    """Whether a calendar event (from calendar.get_events) contains a folded text, in its
+    title or its description. No text: every event."""
+    if not text:
+        return True
+    return text in fold(f"{event.get('summary') or ''} {event.get('description') or ''}")
 
 
 def calendar_days(events: Iterable[tuple[str, str]], tz: tzinfo) -> set[date]:

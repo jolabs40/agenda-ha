@@ -17,6 +17,15 @@
     },
     "end_absence": {
       "service": "mdi:home-import-outline"
+    },
+    "advance": {
+      "service": "mdi:skip-next"
+    },
+    "apply_event": {
+      "service": "mdi:play-circle-outline"
+    },
+    "resume": {
+      "service": "mdi:calendar-refresh"
     }
   }
 }

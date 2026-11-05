@@ -32,48 +32,68 @@ Assistant in het Nederlands staat.
     Een blok noemt de kalenders waarvan zijn gebeurtenis afhangt, en omlijnt degene die hem die dag
     laat lopen; dagen die een kalender uit een reeks haalt, verschijnen gearceerd.
   - Maand: de gebeurtenissen van elke dag, met feestdagen en schoolvakanties.
-  - Huis: alle agenda's over één dag, met wat elk apparaat nu doet.
+  - Huis: alle agenda's over één dag, met wat elk apparaat nu doet en, bij thermostaten, de
+    gemeten temperatuur onder de instelwaarde.
   - Lijst: alle gebeurtenissen en hun herhaling.
 - Op een breed scherm staan de agenda's in een kolom, zoals in het Kalender-paneel: vink aan welke
   je wilt zien, zie wat elke agenda nu doet en wanneer hij wisselt, pauzeer hem of open zijn
   instellingen. Op een telefoon doen chips bovenaan hetzelfde. De knop Gebeurtenis toevoegen staat
   rechtsonder.
+- Andere kalenders van Home Assistant (schoolvakanties, een gezinskalender...) vink je in dezelfde
+  kolom aan; ze verschijnen gearceerd in week, maand en huis, alleen ter informatie.
 - Herhaling elke N dagen, weken (op gekozen weekdagen, of alleen in even of oneven weken) of
   maanden (op dezelfde datum, op de 2e maandag, op de laatste vrijdag...), eventueel tot een datum.
   Losse dagen kun je uit een reeks halen of eraan toevoegen.
 - Het begin of het einde van een gebeurtenis kan de zonsopgang of zonsondergang volgen, met een
-  verschuiving.
+  verschuiving, niet voor of uiterlijk op een gekozen tijd.
 - Voorwaarden op entiteiten: een gebeurtenis neemt het alleen over zolang er bijvoorbeeld iemand
-  thuis is of een raam dicht is.
+  thuis is, een raam dicht is of de buitentemperatuur onder 5 °C ligt; allemaal, of minstens één
+  ervan.
 - De feestdagen van je land kunnen worden overgeslagen, of de enige dagen zijn.
 - Kalenders kunnen als voorwaarde dienen: dagen met een gebeurtenis erin overslaan (reizen,
   afwezigheden), alleen die dagen houden, of allebei bij dezelfde gebeurtenis. Bij meerdere
   kalenders volstaat een gebeurtenis in één ervan, of moet er een in elk staan.
   De feestdagen kunnen een van deze kalenders zijn, voor een gebeurtenis die op thuiswerkdagen of
-  op feestdagen loopt.
+  op feestdagen loopt. Een kalender kan ook alleen zijn gebeurtenissen met een bepaalde tekst
+  tellen, zoals de dure dagen van een kalender met stroomtarieven.
 - Een kalender van de schoolvakanties kies je één keer voor alle agenda's. Elke herhaalde
   gebeurtenis geldt dan altijd, alleen in de schoolperiode of alleen in de schoolvakantie, en het
   weekoverzicht markeert de vakanties.
 - Acties bij het begin en aan het einde van elke gebeurtenis, met de gewone actie-editor van Home
   Assistant.
+- Wijzigingen met de hand worden gerespecteerd: een met de hand ingesteld apparaat blijft zo tot de
+  volgende wissel, of tot de volgende dag, of wordt meteen teruggezet, naar keuze per agenda. Een
+  herstart houdt ze.
+- Afwijkingen: Naar de volgende past de volgende wissel meteen toe, Nu toepassen (in de
+  gebeurtenis-editor) past een gebeurtenis toe tot haar einde, Schema hervatten heft ze op.
+- Elk apparaat wordt gevolgd. Is het niet beschikbaar, dan krijgt het zijn toestand zodra het
+  terug is; neemt het die niet over, dan volgt een tweede poging en daarna een probleem onder
+  Reparaties. Apparaten zonder terugmelding van hun toestand (rolluiken via radio) krijgen hun
+  opdracht één keer, na elkaar met een korte pauze.
+- Airco's: een gebeurtenis kan modus, ventilatorstand en zwenken samen met de temperatuur
+  instellen, of alleen een modus (alleen ventilator, ontvochtigen).
 - Een afwezigheidsmodus voor het hele huis: de agenda's die hem volgen, houden hun
-  afwezigheidstoestand tot een datum, of tot hij wordt gestopt.
+  afwezigheidstoestand tot een datum, of tot hij wordt gestopt. De andere (lampen) kunnen intussen
+  aanwezigheid nabootsen.
 - Per agenda: een `calendar`-entiteit (Kalender-paneel, kalendertriggers), een schakelaar Actief die
   de agenda pauzeert, de sensoren Nu en Volgende wijziging.
 - Acties voor automatiseringen en spraakassistenten: de volgende gebeurtenis overslaan, datums
-  toevoegen of verwijderen, de afwezigheidsmodus starten of beëindigen.
+  toevoegen of verwijderen, van het schema afwijken, de afwezigheidsmodus starten of beëindigen.
+- Het logboek noemt de agenda die een apparaat heeft gewijzigd, en twee gebeurtenissen laten
+  automatiseringen reageren.
 - Gebruikers zonder beheerdersrechten kunnen gebeurtenissen mogen bewerken; start- en eindacties
   blijven bij de beheerders.
 - Na een herstart worden de gekoppelde apparaten in de toestand gezet die de agenda verwacht (per
-  agenda uit te schakelen).
-- Een dashboardkaart, `custom:agenda-card`.
+  agenda uit te schakelen), behalve de met de hand ingestelde.
+- Een dashboardkaart, `custom:agenda-card`, met een visuele editor.
+- Temperaturen in °C of °F, zoals ingesteld in Home Assistant.
 - In het Engels, Frans, Duits en Nederlands.
 
 Wat een agenda kan aansturen:
 
 | Type | Entiteiten | Toestanden |
 |---|---|---|
-| Thermostaten | `climate` | temperatuur, modus, uit |
+| Thermostaten | `climate` | temperatuur (met modus, ventilatorstand en zwenken voor airco's), voorinstelling, alleen modus, uit |
 | Aan / uit | `switch`, `light`, `input_boolean`, `fan` | aan (met helderheid voor lampen), uit |
 | Rolluiken | `cover` | open, dicht, positie |
 | Keuzelijst | `select`, `input_select` | een van de opties |
@@ -114,11 +134,34 @@ Het pictogram van de integratie verschijnt vanaf Home Assistant 2026.3.
   nacht wint tot ze afloopt, daarna neemt het weekend het over.
 - Bij elke wissel lopen eerst de acties aan het einde, dan wordt de toestand toegepast, dan lopen
   de acties bij het begin. Thermostaten krijgen hun instelwaarde bij het begin van elke
-  gebeurtenis, dus een handmatige wijziging blijft tot de volgende gebeurtenis. Andere apparaten
-  worden alleen aangesproken als hun toestand afwijkt.
+  gebeurtenis. Andere apparaten worden alleen aangesproken als hun toestand afwijkt, behalve
+  apparaten zonder terugmelding: wat ze tonen is maar een aanname, dus krijgen ze altijd hun
+  opdracht.
 - Tijden zijn lokale kloktijden: een gebeurtenis om 21:30 blijft bij de overgang naar zomer- of
   wintertijd om 21:30.
 - De schakelaar Actief pauzeert de agenda volledig.
+
+## Wijzigingen met de hand
+
+Een met de hand ingesteld apparaat, op het apparaat zelf of in Home Assistant, wordt als zodanig
+herkend. De instelling Wijzigingen met de hand van elke agenda bepaalt wat er volgt:
+
+| Keuze | Wat de agenda doet |
+|---|---|
+| Behouden tot de volgende wissel (standaard) | laat het tot het begin of einde van de volgende gebeurtenis |
+| Behouden tot de volgende dag | laat het tot middernacht |
+| Meteen teruggezet zoals de agenda wil | zet het na 5 seconden terug; na drie keer in tien minuten laat ze het tot de volgende wissel |
+| De agenda gaat altijd voor | negeert het, de volgende wissel geldt zoals gewoonlijk |
+
+Een herstart houdt deze wijzigingen, `agenda.resync` ook. Nu toepassen in de instellingen haalt
+alle apparaten terug. De kolom toont "met de hand ingesteld tot...", en de sensor Nu noemt deze
+apparaten in het attribuut `set_by_hand`.
+
+Afwijkingen veranderen het schema zelf, tot de tijd die ze tonen (`override_until` op de sensor
+Nu): Naar de volgende past de toestand van de volgende wissel meteen toe (nog eens: die daarna),
+Nu toepassen in de gebeurtenis-editor past de toestand van die gebeurtenis toe tot het einde van
+haar volgende keer. Schema hervatten heft beide op en haalt de met de hand ingestelde apparaten
+terug.
 
 ## Acties
 
@@ -144,11 +187,17 @@ hun wijzigingen houden de bestaande acties.
 De tijden van de zon berekent Home Assistant dag voor dag voor de locatie die is ingesteld onder
 Instellingen > Systeem > Algemeen. Als de zon het einde van een gebeurtenis vóór het begin brengt
 (zonsondergang na een vast einde om 21:00 in de zomer), vindt de gebeurtenis die dag niet plaats.
+Niet voor en Uiterlijk begrenzen een zonnetijd: rolluiken die bij zonsondergang sluiten, maar niet
+voor 18:00.
 
 Voorwaarden vergelijken de toestand van een entiteit: `person.alex` is `home`,
-`binary_sensor.raam` is niet `on`. Ze worden gelezen bij het begin van de gebeurtenis en bij elke
-wijziging van de entiteit. Een gebeurtenis waarvan de voorwaarden niet meer kloppen, laat het over
-aan de volgende gebeurtenis, of aan de standaardtoestand; haar acties aan het einde lopen toch.
+`binary_sensor.raam` is niet `on`, `sensor.buitentemperatuur` is onder `5`. Bij meerdere
+voorwaarden vraagt de gebeurtenis ze allemaal, of minstens één ervan. Ze worden gelezen bij het
+begin van de gebeurtenis en bij elke wijziging van de entiteit. Een gebeurtenis waarvan de
+voorwaarden niet meer kloppen, laat het over aan de volgende gebeurtenis, of aan de
+standaardtoestand; haar acties aan het einde lopen toch. Een entiteit die onbeschikbaar wordt,
+houdt tien minuten haar laatste toestand, ook over een herstart: een sensor die even wegvalt,
+verandert niets.
 
 ## Afwezigheidsmodus
 
@@ -158,6 +207,11 @@ houdt elke agenda die hem volgt (een optie in haar instellingen) haar afwezighei
 anders haar standaardtoestand, en voert ze geen actie uit. Aan het einde keert elke agenda terug
 naar haar programma.
 
+Een agenda die hem niet volgt, kan in plaats daarvan aanwezigheid nabootsen
+(Aanwezigheidssimulatie, in haar instellingen): tijdens een afwezigheid verschuiven haar begin- en
+eindtijden willekeurig tot het gekozen aantal minuten, eerder of later, zodat de lampen niet elke
+dag op hetzelfde moment aangaan.
+
 ## Automatiseringen
 
 | Actie | Doel | Gegevens |
@@ -165,9 +219,12 @@ naar haar programma.
 | `agenda.skip_next` | de kalender van een agenda | `event` (naam, optioneel): verwijdert de volgende gebeurtenis |
 | `agenda.add_dates` | de kalender van een agenda | `event`, `dates`: voegt op deze dagen gebeurtenissen toe |
 | `agenda.remove_dates` | de kalender van een agenda | `event`, `dates`: verwijdert de gebeurtenissen op deze dagen |
+| `agenda.advance` | de kalender van een agenda | past de volgende wissel meteen toe (Naar de volgende) |
+| `agenda.apply_event` | de kalender van een agenda | `event` (naam): past deze gebeurtenis toe tot het einde van haar volgende keer |
+| `agenda.resume` | de kalender van een agenda | beëindigt de afwijking en haalt de met de hand ingestelde apparaten terug |
 | `agenda.set_absence` | | `until` (optioneel): start de afwezigheidsmodus |
 | `agenda.end_absence` | | beëindigt hem |
-| `agenda.resync` | de kalender van een agenda | zet de apparaten in de toestand die de agenda nu wil |
+| `agenda.resync` | de kalender van een agenda | zet de apparaten in de toestand die de agenda nu wil, behalve de met de hand ingestelde |
 
 ```yaml
 - action: agenda.skip_next
@@ -176,6 +233,45 @@ naar haar programma.
   data:
     event: Ochtend
 ```
+
+De `calendar`-entiteit van elke agenda werkt ook met de kalendertrigger van Home Assistant, zo
+nodig met een verschuiving:
+
+```yaml
+triggers:
+  - trigger: calendar
+    event: start
+    entity_id: calendar.agenda_woonkamer
+    offset: "-0:15:00"
+actions:
+  - action: notify.mobile_app_telefoon
+    data:
+      message: "{{ trigger.calendar_event.summary }} over 15 minuten"
+```
+
+## Gebeurtenissen en logboek
+
+Elke toestand die een apparaat krijgt, vuurt `agenda_state_applied` af; een apparaat dat hem na
+een tweede poging nog niet toont, vuurt `agenda_state_failed` af en krijgt een probleem onder
+Reparaties. Hun gegevens: `agenda`, `entry_id`, `entity_id`, `state`, `label` (de toestand zoals
+het paneel hem toont), en bij `agenda_state_applied` de reden `reason` (`schedule`, `edit`,
+`resync`, `available`, `retry`...) en de gebeurtenis `event` (`id` en `name`) als een
+gebeurtenis hem bepaalde.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: agenda_state_failed
+actions:
+  - action: notify.mobile_app_telefoon
+    data:
+      message: "{{ trigger.event.data.entity_id }} heeft {{ trigger.event.data.label }} niet overgenomen"
+```
+
+Het logboek toont een regel voor elke toegepaste toestand ("ingesteld door agenda Slaapkamer:
+19 °C"), en de wijzigingen van het apparaat noemen de agenda als oorzaak. Is het logboek op één
+apparaat gefilterd, dan houdt Home Assistant alleen de regels van de integratie van dat apparaat:
+de oorzaak staat er nog steeds, de regel van de agenda alleen in het volledige logboek.
 
 ## Feestdagen
 
@@ -211,9 +307,16 @@ title: Verwarming                 # optioneel
 type: custom:agenda-card
 view: week
 agenda: Slaapkamer
+hour_height: 32                   # optioneel
 ```
 
-Een klik op de kaart opent het paneel.
+```yaml
+type: custom:agenda-card
+view: next                        # resterende tijd, toestand, volgende wissel, Naar de volgende en Hervatten
+agenda: Slaapkamer
+```
+
+De kaart heeft een visuele editor. Een klik erop opent het paneel.
 
 ## Steun
 

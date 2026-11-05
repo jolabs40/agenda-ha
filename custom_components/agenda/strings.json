@@ -87,6 +87,30 @@
     "end_absence": {
       "name": "End the absence mode",
       "description": "Agendas go back to their schedule."
+    },
+    "advance": {
+      "name": "Skip to the next state",
+      "description": "Applies now the state the agenda would reach at its next change, until that time comes."
+    },
+    "apply_event": {
+      "name": "Apply an event now",
+      "description": "Applies now the state of an event, until its next occurrence ends.",
+      "fields": {
+        "event": {
+          "name": "Event",
+          "description": "Event name (the first one to come)."
+        }
+      }
+    },
+    "resume": {
+      "name": "Resume the schedule",
+      "description": "Ends the override, and takes back the devices changed by hand."
+    }
+  },
+  "issues": {
+    "not_applied": {
+      "title": "{entity} does not follow the agenda {agenda}",
+      "description": "Agenda sent {state} to {entity} twice, and the device still shows something else. Check that it is reachable and that it accepts this state (its limits, its modes). This notice goes away once the device follows the agenda again."
     }
   }
 }

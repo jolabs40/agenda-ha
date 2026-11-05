@@ -9,6 +9,7 @@ const {
   esc,
   fmtDay,
   friendlyName,
+  areaName,
   loadHaComponents,
   monthlyLabel,
   wall,
@@ -22,6 +23,7 @@ const SUN_LIMIT = 720; // minutes of offset, as on the server
 
 /** "HH:MM" plus minutes, wrapped around the day. */
 const addMinutes = (hhmm, minutes) => wallTime(wm(`2000-01-01T${hhmm}`) + minutes);
+const minutesOf = (hhmm) => wm(`2000-01-01T${hhmm}`) - wm("2000-01-01T00:00");
 const kinds = await import(`./agenda-kinds.js${V}`);
 
 const SWATCHES = [
@@ -116,6 +118,27 @@ export function confirmDialog(host, { title, text, buttons }) {
     .join("");
   dlg.open(`<p class="dlg-text">${esc(text)}</p>`, `<span class="grow"></span>${footer}`);
   dlg.$$("[data-value]").forEach((b) => b.addEventListener("click", () => dlg.close(b.dataset.value)));
+  return dlg.done;
+}
+
+/** On a phone, which calendars that are not agendas to show. Resolves with their ids on close. */
+export function calendarsDialog(host, { T, calendars, selected }) {
+  const dlg = new Dialog(host, { title: T.other_calendars });
+  const rows = calendars
+    .map(
+      (c) =>
+        `<label class="tgl xcal-row"><input type="checkbox" value="${esc(c.id)}" ${selected.has(c.id) ? "checked" : ""}><span></span><i class="dot" style="--c:${esc(c.color)}"></i>${esc(c.name)}</label>`,
+    )
+    .join("");
+  dlg.open(
+    `<p class="hint">${esc(T.other_calendars_hint)}</p><div class="xcal-list">${rows}</div>`,
+    `<span class="grow"></span><button class="btn primary" data-ok>${esc(T.close)}</button>`,
+  );
+  const picked = () => dlg.$$(".xcal-row input:checked").map((i) => i.value);
+  dlg.$("[data-ok]").addEventListener("click", () => dlg.close(picked()));
+  // closing by the cross or outside keeps what was ticked as well
+  const close = dlg.close.bind(dlg);
+  dlg.close = (value) => close(value === null && dlg.root ? picked() : value);
   return dlg.done;
 }
 
@@ -267,6 +290,7 @@ export function eventEditor(host, opts) {
   };
   // two lists here; stored as calendars, plus except_calendars when both are used
   const r0 = ev.repeat;
+  const calTexts = { ...(r0.calendar_texts || {}) };
   const cal =
     r0.calendar_mode === "only"
       ? {
@@ -287,7 +311,12 @@ export function eventEditor(host, opts) {
   const admin = Boolean(hass.user?.is_admin);
   ev.start_sun = ev.start_sun || null;
   ev.end_sun = ev.end_sun || null;
-  ev.conditions = structuredClone(ev.conditions || []);
+  // conditions as the form edits them: an operator and a value
+  ev.conditions = (ev.conditions || []).map((c) => {
+    const op = c.above != null ? "above" : c.below != null ? "below" : c.not ? "not" : "is";
+    return { entity_id: c.entity_id, op, value: String(c.above ?? c.below ?? c.state ?? "") };
+  });
+  ev.conditions_match = ev.conditions_match || "all";
   // sunrise and sunset of the dates shown, from the server
   const sunTimes = new Map();
   const sunAllowed = () => !ev.all_day && st.scope === "series";
@@ -309,7 +338,11 @@ export function eventEditor(host, opts) {
     const typed = which === "start" ? f.t1 : f.t2;
     const anchor = anchorOf(which);
     const sun = anchor && sunTimes.get(f.date)?.[anchor.event];
-    return sun ? addMinutes(sun, Number(anchor.offset) || 0) : typed;
+    if (!sun) return typed;
+    let time = addMinutes(sun, Number(anchor.offset) || 0);
+    if (anchor.not_before && time < anchor.not_before) time = anchor.not_before;
+    if (anchor.not_after && time > anchor.not_after) time = anchor.not_after;
+    return time;
   };
   const occ = opts.occurrence && ev.repeat.freq !== "none" ? opts.occurrence : null;
   const st = { scope: "series" };
@@ -385,7 +418,10 @@ export function eventEditor(host, opts) {
       <textarea class="inp" rows="2" data-f="note">${esc(ev.note || "")}</textarea></details>
     <label class="tgl"><input type="checkbox" data-f="enabled" ${ev.enabled === false ? "" : "checked"}><span></span>${esc(T.enabled_event)}</label>`;
 
+  // the state of the form, saved or not, ahead of the schedule until this occurrence ends
+  const canApply = !isNew && agenda.enabled && kinds.hasStates(agenda) && (agenda.settings.entities || []).length > 0;
   const footer = `${isNew ? "" : `<button class="btn danger flat" data-del>${esc(T.delete)}</button><button class="btn flat" data-dup>${esc(T.duplicate)}</button>`}
+    ${canApply ? `<button class="btn flat" data-apply-now>${esc(T.apply_now)}</button>` : ""}
     <span class="grow"></span>
     <button class="btn" data-close>${esc(T.cancel)}</button>
     <button class="btn primary" data-save>${esc(T.save)}</button>`;
@@ -439,7 +475,16 @@ export function eventEditor(host, opts) {
         const info = anchor
           ? `<small class="hint">${esc(T.sun_on(timeOf(which), fmtDay(wm(f.date), T._lang, { day: "numeric", month: "short" })))}</small>`
           : "";
-        return `<div class="fld sm bound"><span>${label}</span><div class="row tight">${choice}${input}</div>${info}</div>`;
+        // optional clock bounds of the sun time
+        const limits = anchor
+          ? `<div class="sunlim">${["not_before", "not_after"]
+              .map(
+                (k) =>
+                  `<label><span>${esc(T[k])}</span><input type="time" class="inp" step="300" data-lim="${which}:${k}" value="${esc(anchor[k] || "")}"></label>`,
+              )
+              .join("")}</div>`
+          : "";
+        return `<div class="fld sm bound"><span>${label}</span><div class="row tight">${choice}${input}</div>${info}${limits}</div>`;
       };
       sec.innerHTML = `<div class="fld"><span>${esc(T.when)}</span>
         <label class="tgl"><input type="checkbox" data-allday ${ev.all_day ? "checked" : ""}><span></span>${esc(T.all_day)}</label>
@@ -467,7 +512,29 @@ export function eventEditor(host, opts) {
         sel.addEventListener("change", () => {
           const which = sel.dataset.anchor;
           const old = ev[`${which}_sun`];
-          ev[`${which}_sun`] = sel.value === "fixed" ? null : { event: sel.value, offset: old ? old.offset : 0 };
+          // the time of day shown stays the same: the offset, or the typed time, follows it
+          const shown = timeOf(which);
+          if (sel.value === "fixed") {
+            if (shown) F()[which === "start" ? "t1" : "t2"] = shown;
+            ev[`${which}_sun`] = null;
+          } else {
+            const sun = sunTimes.get(F().date)?.[sel.value];
+            let offset = old ? old.offset : 0;
+            if (sun && shown) {
+              offset = Math.round((minutesOf(shown) - minutesOf(sun)) / 5) * 5;
+              offset = Math.max(-SUN_LIMIT, Math.min(SUN_LIMIT, offset));
+            }
+            ev[`${which}_sun`] = { ...(old || {}), event: sel.value, offset };
+          }
+          sections.when();
+        }),
+      );
+      sec.querySelectorAll("[data-lim]").forEach((inp) =>
+        inp.addEventListener("change", () => {
+          const [which, key] = inp.dataset.lim.split(":");
+          const anchor = ev[`${which}_sun`];
+          if (inp.value) anchor[key] = inp.value;
+          else delete anchor[key];
           sections.when();
         }),
       );
@@ -571,12 +638,17 @@ export function eventEditor(host, opts) {
       const taken = [...cal.only, ...cal.except];
       // the public holidays come first, as a calendar of their own
       const free = [{ entity_id: HOLIDAYS }, ...calendars()].filter((c) => !taken.includes(c.entity_id));
+      // optional text the calendar's events must contain (in their title or description)
+      const textInput = (id) =>
+        id === HOLIDAYS
+          ? ""
+          : `<input class="inp pill-text" data-cal-text="${esc(id)}" placeholder="${esc(T.containing)}" title="${esc(T.containing_hint)}" value="${esc(calTexts[id] || "")}">`;
       const side = (key) => `<div class="calside">
           <span class="sub">${esc(key === "only" ? T.calendar_only : T.calendar_exclude)}</span>
           <div class="pills">${cal[key]
             .map(
               (id) =>
-                `<span class="pill">${esc(calendarName(hass, id, T))}<button data-rm-cal="${key}:${esc(id)}">×</button></span>`,
+                `<span class="pill">${esc(calendarName(hass, id, T))}${textInput(id)}<button data-rm-cal="${key}:${esc(id)}">×</button></span>`,
             )
             .join("")}
             ${free.length ? `<select class="inp" data-cal="${key}"><option value="">${esc(T.add_calendar)}</option>${free.map((c) => `<option value="${esc(c.entity_id)}">${esc(calendarName(hass, c.entity_id, T))}</option>`).join("")}</select>` : ""}
@@ -621,7 +693,15 @@ export function eventEditor(host, opts) {
           const at = b.dataset.rmCal.indexOf(":");
           const key = b.dataset.rmCal.slice(0, at);
           cal[key] = cal[key].filter((id) => id !== b.dataset.rmCal.slice(at + 1));
+          delete calTexts[b.dataset.rmCal.slice(at + 1)];
           sections.exceptions();
+        }),
+      );
+      sec.querySelectorAll("[data-cal-text]").forEach((inp) =>
+        inp.addEventListener("change", () => {
+          const text = inp.value.trim();
+          if (text) calTexts[inp.dataset.calText] = text;
+          else delete calTexts[inp.dataset.calText];
         }),
       );
       sec
@@ -638,18 +718,35 @@ export function eventEditor(host, opts) {
           );
           return `<div class="row tight cond" data-cond="${i}">
             <input class="inp grow" list="agenda-entities" data-c="entity_id" value="${esc(c.entity_id || "")}" placeholder="${esc(T.cond_entity)}">
-            <select class="inp" data-c="not">
-              <option value="" ${c.not ? "" : "selected"}>${esc(T.cond_is)}</option>
-              <option value="1" ${c.not ? "selected" : ""}>${esc(T.cond_is_not)}</option>
-            </select>
-            <input class="inp" list="agenda-states-${i}" data-c="state" value="${esc(c.state || "")}" placeholder="${esc(T.state)}">
+            <select class="inp" data-c="op">${[
+              ["is", T.cond_is],
+              ["not", T.cond_is_not],
+              ["above", T.cond_above],
+              ["below", T.cond_below],
+            ]
+              .map(([v, text]) => `<option value="${v}" ${c.op === v ? "selected" : ""}>${esc(text)}</option>`)
+              .join("")}</select>
+            ${
+              c.op === "above" || c.op === "below"
+                ? `<input class="inp num" type="number" step="any" data-c="value" value="${esc(c.value)}">`
+                : `<input class="inp" list="agenda-states-${i}" data-c="value" value="${esc(c.value)}" placeholder="${esc(T.state)}">`
+            }
             <datalist id="agenda-states-${i}">${[...states].map((s) => `<option value="${esc(s)}"></option>`).join("")}</datalist>
             <button class="ic" data-cond-rm="${i}" title="${esc(T.delete)}"><ha-icon icon="mdi:close"></ha-icon></button>
           </div>`;
         })
         .join("");
       const entities = Object.keys(hass.states).sort();
-      sec.innerHTML = `<p class="hint">${esc(T.conditions_hint)}</p>${rows}
+      const match =
+        ev.conditions.length > 1
+          ? `<select class="inp" data-cmatch>${["all", "any"]
+              .map(
+                (v) =>
+                  `<option value="${v}" ${ev.conditions_match === v ? "selected" : ""}>${esc(v === "all" ? T.cond_all : T.cond_any)}</option>`,
+              )
+              .join("")}</select>`
+          : "";
+      sec.innerHTML = `<p class="hint">${esc(T.conditions_hint)}</p>${match}${rows}
         <datalist id="agenda-entities">${entities.map((e) => `<option value="${esc(e)}">${esc(friendlyName(hass, e))}</option>`).join("")}</datalist>
         <button class="btn flat" data-cond-add><ha-icon icon="mdi:plus"></ha-icon>${esc(T.add_condition)}</button>`;
       dlg.$("[data-ccount]").textContent = ev.conditions.length ? ` · ${ev.conditions.length}` : "";
@@ -658,11 +755,13 @@ export function eventEditor(host, opts) {
         row.querySelectorAll("[data-c]").forEach((inp) =>
           inp.addEventListener("change", () => {
             const key = inp.dataset.c;
-            ev.conditions[i][key] = key === "not" ? inp.value === "1" : inp.value.trim();
-            if (key === "entity_id") sections.conditions();
+            ev.conditions[i][key] = inp.value.trim();
+            // a number or a state: the value field changes with the operator
+            if (key === "entity_id" || key === "op") sections.conditions();
           }),
         );
       });
+      sec.querySelector("[data-cmatch]")?.addEventListener("change", (x) => (ev.conditions_match = x.target.value));
       sec.querySelectorAll("[data-cond-rm]").forEach((b) =>
         b.addEventListener("click", () => {
           ev.conditions.splice(Number(b.dataset.condRm), 1);
@@ -670,7 +769,7 @@ export function eventEditor(host, opts) {
         }),
       );
       sec.querySelector("[data-cond-add]").addEventListener("click", () => {
-        ev.conditions.push({ entity_id: "", state: "", not: false });
+        ev.conditions.push({ entity_id: "", op: "is", value: "" });
         sections.conditions();
       });
     },
@@ -752,8 +851,16 @@ export function eventEditor(host, opts) {
       out.end_sun = null;
     }
     out.conditions = ev.conditions
-      .filter((c) => c.entity_id && c.state)
-      .map((c) => ({ entity_id: c.entity_id, state: c.state, not: Boolean(c.not) }));
+      .filter((c) => c.entity_id && c.value !== "")
+      .map((c) =>
+        c.op === "above" || c.op === "below"
+          ? { entity_id: c.entity_id, [c.op]: Number(c.value) }
+          : { entity_id: c.entity_id, state: c.value, not: c.op === "not" },
+      )
+      .filter((c) => c.state != null || Number.isFinite(c.above ?? c.below));
+    // "all" is the default, written only otherwise so that older versions still read the event
+    if (out.conditions.length > 1 && ev.conditions_match === "any") out.conditions_match = "any";
+    else delete out.conditions_match;
     if (out.repeat.freq === "weekly" && !out.repeat.weekdays.length) out.repeat.weekdays = [weekday(wm(out.start))];
     if (out.repeat.freq !== "weekly") out.repeat.weekdays = [];
     if (out.repeat.freq !== "monthly") out.repeat.monthly = "day";
@@ -762,6 +869,11 @@ export function eventEditor(host, opts) {
     const match = (key) => (cal[key].length > 1 ? cal[`${key}_match`] : "any");
     delete out.repeat.except_calendars;
     delete out.repeat.except_match;
+    const texts = Object.fromEntries(
+      Object.entries(calTexts).filter(([id, text]) => text && [...cal.only, ...cal.except].includes(id)),
+    );
+    if (Object.keys(texts).length) out.repeat.calendar_texts = texts;
+    else delete out.repeat.calendar_texts;
     if (cal.only.length) {
       Object.assign(out.repeat, { calendars: cal.only, calendar_mode: "only", calendar_match: match("only") });
       if (cal.except.length) Object.assign(out.repeat, { except_calendars: cal.except, except_match: match("except") });
@@ -790,6 +902,23 @@ export function eventEditor(host, opts) {
         await opts.ws({ type: "agenda/event/save", entry_id: agenda.entry_id, event: out });
       }
       dlg.close("saved");
+    }, T),
+  );
+
+  const applyNow = dlg.$("[data-apply-now]");
+  applyNow?.addEventListener("click", () =>
+    dlg.run(async () => {
+      if (!ev.state) return; // nothing to apply: no state chosen
+      await opts.ws({
+        type: "agenda/override",
+        entry_id: agenda.entry_id,
+        action: "event",
+        event_id: ev.id,
+        state: ev.state,
+      });
+      // the form stays open: it may still be saved, or left
+      applyNow.disabled = true;
+      applyNow.innerHTML = `<ha-icon icon="mdi:check"></ha-icon>${esc(T.apply_now)}`;
     }, T),
   );
 
@@ -879,6 +1008,14 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
     <section data-sec="entities"></section>
     <section data-sec="default"></section>
     <label class="tgl" data-resync-row><input type="checkbox" data-resync ${cfg.resync_on_start ? "checked" : ""}><span></span>${esc(T.resync_on_start)}</label>
+    <label class="fld" data-manual-row><span>${esc(T.manual_hold)}</span>
+      <select class="inp" data-manual>${Object.entries(T.manual_holds)
+        .map(
+          ([v, text]) =>
+            `<option value="${v}" ${v === (cfg.manual_hold || "next_change") ? "selected" : ""}>${esc(text)}</option>`,
+        )
+        .join("")}</select>
+      <p class="hint">${esc(T.manual_hold_hint)}</p></label>
     <section data-sec="absence"></section>
     <details class="more"><summary>${esc(T.holidays_title)}</summary><div data-sec="holidays"></div></details>`;
   const footer = `<button class="btn danger flat" data-del>${esc(T.delete_agenda)}</button>
@@ -931,6 +1068,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
         }),
       );
       dlg.$("[data-resync-row]").hidden = cfg.kind === "none";
+      dlg.$("[data-manual-row]").hidden = cfg.kind === "none";
       dlg.$("[data-apply]").hidden = cfg.kind === "none";
     },
     entities() {
@@ -951,21 +1089,22 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
       const box = dlg.$("[data-clim]");
       if (!box) return;
       const f = filter.toLowerCase();
-      const label = (s) => s.attributes.friendly_name || s.entity_id;
+      const label = (s) => friendlyName(hass, s.entity_id);
+      const where = (s) => areaName(hass, s.entity_id);
       const rows = kinds
         .entitiesOfKind(hass, cfg.kind)
         .sort(
           (a, b) =>
             cfg.entities.includes(b.entity_id) - cfg.entities.includes(a.entity_id) || label(a).localeCompare(label(b)),
         )
-        .filter((s) => !f || `${label(s)} ${s.entity_id}`.toLowerCase().includes(f));
+        .filter((s) => !f || `${label(s)} ${where(s)} ${s.entity_id}`.toLowerCase().includes(f));
       const one = { ...agenda, settings: { ...cfg } };
       box.innerHTML = rows.length
         ? rows
             .map((s) => {
               one.settings.entities = [s.entity_id];
               return `<label class="clim-row"><input type="checkbox" data-cl="${esc(s.entity_id)}" ${cfg.entities.includes(s.entity_id) ? "checked" : ""}>
-                <span><b>${esc(label(s))}</b><small>${esc(s.entity_id)}</small></span>
+                <span><b>${esc(label(s))}</b><small>${esc([where(s), s.entity_id].filter(Boolean).join(" · "))}</small></span>
                 <em>${esc(kinds.liveText(hass, one, T))}</em></label>`;
             })
             .join("")
@@ -1000,7 +1139,16 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
         cfg.follow_absence && cfg.kind !== "none"
           ? `<div class="fld"><span>${esc(T.away_state)}</span>${kinds.statePicker(hass, view(), cfg.away_state, T, { allowNone: true, noneLabel: T.away_default })}</div>`
           : "";
-      sec.innerHTML = `<label class="tgl"><input type="checkbox" data-follow ${cfg.follow_absence ? "checked" : ""}><span></span>${esc(T.follow_absence)}</label>${picker}`;
+      const presence =
+        !cfg.follow_absence && cfg.kind !== "none"
+          ? `<label class="fld"><span>${esc(T.presence)}</span>
+              <div class="row tight"><input type="number" class="inp num" min="0" max="60" step="5" data-jitter value="${Number(cfg.presence_jitter) || 0}"> min</div>
+              <p class="hint">${esc(T.presence_hint)}</p></label>`
+          : "";
+      sec.innerHTML = `<label class="tgl"><input type="checkbox" data-follow ${cfg.follow_absence ? "checked" : ""}><span></span>${esc(T.follow_absence)}</label>${picker}${presence}`;
+      sec.querySelector("[data-jitter]")?.addEventListener("change", (x) => {
+        cfg.presence_jitter = Math.max(0, Math.min(60, Math.round(Number(x.target.value) || 0)));
+      });
       sec.querySelector("[data-follow]").addEventListener("change", (x) => {
         cfg.follow_absence = x.target.checked;
         sections.absence();
@@ -1071,6 +1219,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
 
   dlg.$("[data-name]").addEventListener("input", (x) => (name = x.target.value));
   dlg.$("[data-resync]").addEventListener("change", (x) => (cfg.resync_on_start = x.target.checked));
+  dlg.$("[data-manual]").addEventListener("change", (x) => (cfg.manual_hold = x.target.value));
 
   const save = async () => {
     await ws({
@@ -1084,6 +1233,8 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
         entities: cfg.kind === "none" ? [] : cfg.entities,
         default_state: cfg.kind === "none" ? null : (cfg.default_state ?? null),
         resync_on_start: !!cfg.resync_on_start,
+        manual_hold: cfg.manual_hold || "next_change",
+        presence_jitter: cfg.kind === "none" || cfg.follow_absence ? 0 : Number(cfg.presence_jitter) || 0,
         follow_absence: !!cfg.follow_absence,
         away_state: cfg.kind === "none" ? null : (cfg.away_state ?? null),
       },
@@ -1144,7 +1295,9 @@ export const DIALOG_STYLES = `
   .dlg-body { padding: 8px 24px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
   .dlg-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px 16px 24px; border-top: 1px solid var(--divider-color); flex-wrap: wrap; }
   .dlg-error { margin: 0 24px 16px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--error-color, #db4437) 14%, transparent); color: var(--error-color, #db4437); font-size: 13px; }
-  .dlg-text { margin: 0; line-height: 1.5; }
+  .dlg-text { margin: 0; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+  .xcal-list { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+  .xcal-row .dot { margin-left: 4px; }
   .grow { flex: 1; }
   .fld { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .fld > span { font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--secondary-text-color); }
@@ -1166,6 +1319,10 @@ export const DIALOG_STYLES = `
   .row.pairs select.inp { width: 100%; min-width: 0; }
   .fld.date { flex: 0 1 220px; }
   .fld.bound { min-width: 230px; }
+  .pill .pill-text { width: 92px; padding: 2px 8px; font-size: 12.5px; margin: 0 2px 0 6px; height: auto; }
+  .sunlim { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 4px; }
+  .sunlim label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--secondary-text-color); }
+  .sunlim .inp { width: 112px; }
   .fld.bound select.inp { flex: 1 1 auto; min-width: 0; }
   .fld.bound input.inp { flex: 0 0 auto; width: auto; }
   .fld.bound .inp.num { width: 72px; }
@@ -1186,6 +1343,11 @@ export const DIALOG_STYLES = `
   .temp-val { text-align: center; font-size: 44px; font-weight: 300; font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--c) 70%, var(--primary-text-color)); }
   .temp-val small { font-size: 18px; margin-left: 2px; }
   .temp-range { grid-column: 1 / -1; width: 100%; accent-color: var(--primary-color); }
+  .srow { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .srow > span { font-size: 12.5px; color: var(--secondary-text-color); }
+  .srow .chips { gap: 6px; }
+  .srow .chip { padding: 4px 11px; font-size: 12.5px; }
+  .srow .chip.on { padding-left: 8px; }
   .ic { border: none; background: none; color: inherit; cursor: pointer; border-radius: 50%; width: 36px; height: 36px; display: inline-grid; place-items: center; }
   .ic:hover { background: var(--agenda-hover); }
   .ic.big { width: 48px; height: 48px; background: var(--agenda-hover); }
