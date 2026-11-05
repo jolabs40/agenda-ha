@@ -11,7 +11,7 @@ des blocs.
 
 [English version](README.md) · [Deutsche Version](README.de.md) · [Nederlandse versie](README.nl.md)
 
-![Vue semaine](docs/week.png)
+![Démonstration d'Agenda](docs/demo.webp)
 
 [Voir la présentation de deux minutes sur YouTube](https://youtu.be/GYiXai78Mzg), sous-titrée en neuf langues dont le français.
 

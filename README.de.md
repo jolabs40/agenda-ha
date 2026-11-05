@@ -11,7 +11,7 @@ Verschieben von Blöcken bearbeitet.
 
 [English version](README.md) · [Version française](README.fr.md) · [Nederlandse versie](README.nl.md)
 
-![Wochenansicht](docs/week.png)
+![Agenda in Aktion](docs/demo.webp)
 
 [Die zweiminütige Vorstellung auf YouTube ansehen](https://youtu.be/GYiXai78Mzg), mit Untertiteln in neun Sprachen, auch auf Deutsch.
 

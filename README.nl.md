@@ -11,7 +11,7 @@ blokken te verslepen.
 
 [English version](README.md) · [Version française](README.fr.md) · [Deutsche Version](README.de.md)
 
-![Weekoverzicht](docs/week.png)
+![Agenda in actie](docs/demo.webp)
 
 [Bekijk de presentatie van twee minuten op YouTube](https://youtu.be/GYiXai78Mzg), met ondertitels in negen talen, ook in het Nederlands.
 

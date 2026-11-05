@@ -10,7 +10,7 @@ Each room or device gets its own agenda, shown as a week you can edit by draggin
 
 [Version française](README.fr.md) · [Deutsche Version](README.de.md) · [Nederlandse versie](README.nl.md)
 
-![Week view](docs/week.png)
+![Agenda demo](docs/demo.webp)
 
 [Watch the two-minute tour on YouTube](https://youtu.be/GYiXai78Mzg), with subtitles in nine languages.
 
