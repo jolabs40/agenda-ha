@@ -38,9 +38,14 @@ Assistant in het Nederlands staat.
 - Op een breed scherm staan de agenda's in een kolom, zoals in het Kalender-paneel: vink aan welke
   je wilt zien, zie wat elke agenda nu doet en wanneer hij wisselt, pauzeer hem of open zijn
   instellingen. Op een telefoon doen chips bovenaan hetzelfde. De knop Gebeurtenis toevoegen staat
-  rechtsonder.
+  rechtsonder. Het paneel opent per browser op het laatst gekozen tabblad, en het tandwiel op de
+  regel Alle leidt naar de gedeelde instellingen.
+- Dupliceren, in de instellingen van een agenda, maakt er een kopie van: dezelfde instellingen,
+  dezelfde gebeurtenissen, zonder de apparaten, die je daarna kiest.
 - Andere kalenders van Home Assistant (schoolvakanties, een gezinskalender...) vink je in dezelfde
   kolom aan; ze verschijnen gearceerd in week, maand en huis, alleen ter informatie.
+- Een gebeurtenis kan meerdere dagen duren, van de ene datum en tijd tot de andere, herhaald of
+  niet. Haar uitzonderingen kijken naar de dag waarop ze begint.
 - Herhaling elke N dagen, weken (op gekozen weekdagen, of alleen in even of oneven weken) of
   maanden (op dezelfde datum, op de 2e maandag, op de laatste vrijdag...), eventueel tot een datum.
   Losse dagen kun je uit een reeks halen of eraan toevoegen.
@@ -56,6 +61,8 @@ Assistant in het Nederlands staat.
   De feestdagen kunnen een van deze kalenders zijn, voor een gebeurtenis die op thuiswerkdagen of
   op feestdagen loopt. Een kalender kan ook alleen zijn gebeurtenissen met een bepaalde tekst
   tellen, zoals de dure dagen van een kalender met stroomtarieven.
+  Ook de eigen agenda van de gebeurtenis kan er een van zijn: een herhaalde vrijdag wijkt voor een
+  week verlof in dezelfde agenda. Dan tellen alleen de gebeurtenissen die er niet van afhangen.
 - Een kalender van de schoolvakanties kies je één keer voor alle agenda's. Elke herhaalde
   gebeurtenis geldt dan altijd, alleen in de schoolperiode of alleen in de schoolvakantie, en het
   weekoverzicht markeert de vakanties.

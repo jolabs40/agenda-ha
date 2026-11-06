@@ -9,7 +9,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.util import slugify
 
-from .const import DOMAIN
+from .const import COPY_OF, DOMAIN
 
 
 class AgendaConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -24,7 +24,8 @@ class AgendaConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(slugify(name))
                 self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=name, data={})
+                copy_of = user_input.get(COPY_OF)
+                return self.async_create_entry(title=name, data={COPY_OF: copy_of} if copy_of else {})
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({vol.Required("name"): str}),

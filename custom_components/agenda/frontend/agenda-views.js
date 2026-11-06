@@ -15,6 +15,7 @@ const {
   splitByDay,
   stack,
   textColor,
+  longRange,
   timeSummary,
   wall,
   wallDate,
@@ -132,7 +133,10 @@ export function renderWeek(ctx) {
   }
   const timeOf = (occ) => {
     const end = wallTime(wm(occ.end));
-    return occ.all_day ? T.all_day : `${wallTime(wm(occ.start))}–${end === "00:00" ? "24:00" : end}`;
+    if (occ.all_day) return T.all_day;
+    return (
+      longRange(wm(occ.start), wm(occ.end), T._lang) ?? `${wallTime(wm(occ.start))}–${end === "00:00" ? "24:00" : end}`
+    );
   };
   // the calendars a repeating event depends on: + only their days, - except their days
   const all = ctx.allAgendas || agendas;
@@ -262,7 +266,8 @@ export function renderMonth(ctx) {
   const vacation = ctx.vacation || {};
   const single = agendas.length === 1;
 
-  // each occurrence is listed on the day it starts, or on the first day shown
+  // each occurrence is listed on the day it starts, or on the first day shown, and on all its
+  // days when it lasts longer than one
   const perDay = {};
   for (const agenda of agendas) {
     const byId = Object.fromEntries(agenda.events.map((e) => [e.id, e]));
@@ -270,8 +275,9 @@ export function renderMonth(ctx) {
     for (const [d, pieces] of Object.entries(split)) {
       for (const piece of pieces) {
         const event = byId[piece.occ.event_id];
-        if (event && (piece.first || Number(d) === firstDay))
-          (perDay[d] ||= []).push({ agenda, event, occ: piece.occ });
+        const long = wm(piece.occ.end) - wm(piece.occ.start) > DAY;
+        if (event && (piece.first || long || Number(d) === firstDay))
+          (perDay[d] ||= []).push({ agenda, event, occ: piece.occ, later: long && !piece.first });
       }
     }
   }
@@ -294,7 +300,7 @@ export function renderMonth(ctx) {
     const items = (perDay[d] || []).sort((a, b) => wm(a.occ.start) - wm(b.occ.start));
     const shown = items.length > 4 ? items.slice(0, 3) : items;
     const chips = shown
-      .map(({ agenda, event, occ, cal }) => {
+      .map(({ agenda, event, occ, cal, later }) => {
         if (cal) {
           const time = occ.all_day ? "" : wallTime(wm(occ.start));
           return `<div class="mo-ev mo-x" data-xev="${esc(cal.id)}" data-xi="${occ.i}" style="--c:${esc(cal.color)}" title="${esc([cal.name, occ.summary, time].filter(Boolean).join(" · "))}">
@@ -305,7 +311,7 @@ export function renderMonth(ctx) {
           hasStates(agenda) && event.state
             ? stateLabel(hass, agenda, event.state, T)
             : eventLabel(hass, agenda, event, T);
-        const time = occ.all_day ? "" : wallTime(wm(occ.start));
+        const time = occ.all_day || later ? "" : wallTime(wm(occ.start));
         const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), time].filter(Boolean).join(" · ");
         return `<div class="mo-ev" ${occData(agenda, occ)} style="--c:${esc(color)};--t:${esc(textColor(color))}" title="${esc(tip)}">
           ${time ? `<b>${time}</b>` : ""}<span>${esc(label)}</span></div>`;

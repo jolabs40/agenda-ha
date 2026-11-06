@@ -5,6 +5,7 @@ const V = new URL(import.meta.url).search;
 const {
   DAY,
   HOLIDAYS,
+  dayOf,
   calendarName,
   esc,
   fmtDay,
@@ -142,10 +143,10 @@ export function calendarsDialog(host, { T, calendars, selected }) {
   return dlg.done;
 }
 
-export function promptDialog(host, { title, label, value = "", ok }) {
+export function promptDialog(host, { title, label, value = "", hint = "", ok }) {
   const dlg = new Dialog(host, { title });
   dlg.open(
-    `<label class="fld"><span>${esc(label)}</span><input class="inp" data-input value="${esc(value)}" autofocus></label>`,
+    `<label class="fld"><span>${esc(label)}</span><input class="inp" data-input value="${esc(value)}" autofocus>${hint ? `<p class="hint">${esc(hint)}</p>` : ""}</label>`,
     `<span class="grow"></span><button class="btn" data-close>${esc(ok.cancel)}</button><button class="btn primary" data-ok>${esc(ok.label)}</button>`,
   );
   const input = dlg.$("[data-input]");
@@ -238,9 +239,13 @@ async function actionEditor(container, hass, value, onChange, T) {
     sel.value = value || [];
     sel.addEventListener("value-changed", (e) => {
       e.stopPropagation();
-      onChange(e.detail.value || []);
+      // HA's editor shows what it is given: left alone, it falls back to the old actions
+      sel.value = e.detail.value || [];
+      onChange(sel.value);
     });
     container.appendChild(sel);
+    // the labels of this editor come with HA's settings pages
+    hass.loadFragmentTranslation?.("config");
     return (h) => (sel.hass = h);
   }
   const area = document.createElement("textarea");
@@ -350,12 +355,18 @@ export function eventEditor(host, opts) {
   // input fields: date, times (or dates for an all-day event)
   const s = wm(ev.start);
   const e = wm(ev.end);
+  // days from the start to the end; 0 leaves it to the times: the same day, or the next one
+  const spanOf = (from, to) => {
+    const days = (dayOf(to) - dayOf(from)) / DAY;
+    return ev.all_day || days === (wallTime(to) <= wallTime(from) ? 1 : 0) ? 0 : days;
+  };
   const form = {
     date: wallDate(s),
     t1: wallTime(s),
     t2: wallTime(e),
     d1: wallDate(s),
     d2: wallDate(e - (ev.all_day ? DAY : 0)),
+    span: spanOf(s, e),
   };
   const occForm = occ
     ? {
@@ -364,9 +375,11 @@ export function eventEditor(host, opts) {
         t2: wallTime(wm(occ.end)),
         d1: occ.day,
         d2: wallDate(wm(occ.end) - DAY),
+        span: spanOf(wm(occ.start), wm(occ.end)),
       }
     : null;
   const F = () => (st.scope === "once" && occForm ? occForm : form);
+  const endDays = () => Math.max(F().span, timeOf("end") <= timeOf("start") ? 1 : 0);
 
   const dlg = new Dialog(host, { title: isNew ? T.create_event : T.edit_event, wide: true });
   const agendaChip = () =>
@@ -457,7 +470,7 @@ export function eventEditor(host, opts) {
       const f = F();
       const repeating = st.scope === "series" && ev.repeat.freq !== "none";
       if (anchorOf("start") || anchorOf("end")) loadSun(f.date);
-      const nextDay = !ev.all_day && timeOf("end") <= timeOf("start");
+      const nextDay = !ev.all_day && endDays() === 1;
       const bound = (which, label) => {
         const anchor = anchorOf(which);
         const key = which === "start" ? "t1" : "t2";
@@ -492,7 +505,8 @@ export function eventEditor(host, opts) {
           ev.all_day
             ? `<div class="row"><label class="fld sm"><span>${esc(repeating ? T.from_date : T.start)}</span><input type="date" class="inp" data-w="d1" value="${f.d1}"></label>
                <label class="fld sm"><span>${esc(T.end)}</span><input type="date" class="inp" data-w="d2" value="${f.d2}"></label></div>`
-            : `<div class="row"><label class="fld sm date"><span>${esc(repeating ? T.from_date : T.date)}</span><input type="date" class="inp" data-w="date" value="${f.date}"></label></div>
+            : `<div class="row"><label class="fld sm date"><span>${esc(repeating ? T.from_date : T.date)}</span><input type="date" class="inp" data-w="date" value="${f.date}"></label>
+               <label class="fld sm date"><span>${esc(repeating ? T.first_end : T.end_date)}</span><input type="date" class="inp" data-end-date min="${f.date}" value="${wallDate(wm(f.date) + endDays() * DAY)}"></label></div>
                <div class="row bounds">${bound("start", esc(T.start))}
                ${bound("end", `${esc(T.end)}${nextDay ? ` <em>(${esc(T.next_day)})</em>` : ""}`)}</div>`
         }</div>`;
@@ -508,6 +522,10 @@ export function eventEditor(host, opts) {
           sections.when();
         }),
       );
+      sec.querySelector("[data-end-date]")?.addEventListener("change", (x) => {
+        F().span = x.target.value ? Math.max(0, (wm(x.target.value) - wm(F().date)) / DAY) : 0;
+        sections.when();
+      });
       sec.querySelectorAll("[data-anchor]").forEach((sel) =>
         sel.addEventListener("change", () => {
           const which = sel.dataset.anchor;
@@ -843,8 +861,7 @@ export function eventEditor(host, opts) {
       const t1 = timeOf("start");
       const t2 = timeOf("end");
       out.start = `${f.date}T${t1}`;
-      const endDay = t2 <= t1 ? wallDate(wm(f.date) + DAY) : f.date;
-      out.end = `${endDay}T${t2}`;
+      out.end = `${wallDate(wm(f.date) + endDays() * DAY)}T${t2}`;
     }
     if (!sunAllowed()) {
       out.start_sun = null;
@@ -982,14 +999,8 @@ const regionName = (code, lang) => {
   }
 };
 
-/** opts: { hass, T, agenda, shared, ws, callApi }; shared comes from agenda/list. */
-export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
-  const cfg = structuredClone(agenda.settings);
-  cfg.kind = cfg.kind || "none";
-  cfg.entities = cfg.entities || [];
-  const initialKind = cfg.kind;
-  let name = agenda.name;
-  let filter = "";
+/** The settings shared by all agendas, in `sec`; save() writes them if they changed. */
+function sharedFields(sec, { hass, T, shared, ws }) {
   const hol = {
     country: shared?.configured || null,
     subdiv: shared?.subdiv || null,
@@ -997,7 +1008,100 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
     allow: Boolean(shared?.allow_users),
     options: null,
   };
-  const holInitial = JSON.stringify([hol.country, hol.subdiv, hol.school, hol.allow]);
+  const values = () => JSON.stringify([hol.country, hol.subdiv, hol.school, hol.allow]);
+  const initial = values();
+  const render = async () => {
+    const lang = T._lang;
+    const haCountry = shared?.ha_country;
+    const country = hol.country || haCountry;
+    if (!hol.options || hol.options.for !== country) {
+      try {
+        const res = await ws({ type: "agenda/holidays/options", country: country || null });
+        hol.options = { ...res, for: country };
+      } catch (_e) {
+        hol.options = { countries: [], subdivisions: [], for: country };
+      }
+    }
+    const { countries, subdivisions } = hol.options;
+    const named = countries.map((c) => [c, regionName(c, lang)]).sort((a, b) => a[1].localeCompare(b[1], lang));
+    sec.innerHTML = `<div class="row">
+        <label class="fld sm"><span>${esc(T.country)}</span><select class="inp" data-country>
+          <option value="">${esc(haCountry ? T.ha_country(regionName(haCountry, lang)) : T.no_ha_country)}</option>
+          ${named.map(([c, n]) => `<option value="${esc(c)}" ${hol.country === c ? "selected" : ""}>${esc(n)}</option>`).join("")}
+        </select></label>
+        ${
+          subdivisions.length
+            ? `<label class="fld sm"><span>${esc(T.subdivision)}</span><select class="inp" data-subdiv>
+          <option value="">${esc(T.whole_country)}</option>
+          ${subdivisions.map((d) => `<option value="${esc(d.code)}" ${hol.subdiv === d.code ? "selected" : ""}>${esc(d.names.length ? `${d.names[d.names.length - 1]} (${d.code})` : d.code)}</option>`).join("")}
+        </select></label>`
+            : ""
+        }
+      </div>
+      <label class="fld"><span>${esc(T.school_calendar)}</span><select class="inp" data-school>
+        <option value="">${esc(T.none)}</option>
+        ${Object.values(hass.states)
+          .filter((x) => x.entity_id.startsWith("calendar."))
+          .sort((a, b) => friendlyName(hass, a.entity_id).localeCompare(friendlyName(hass, b.entity_id)))
+          .map(
+            (c) =>
+              `<option value="${esc(c.entity_id)}" ${hol.school === c.entity_id ? "selected" : ""}>${esc(friendlyName(hass, c.entity_id))}</option>`,
+          )
+          .join("")}
+      </select></label>
+      <p class="hint">${esc(T.school_calendar_hint)}</p>
+      <label class="tgl"><input type="checkbox" data-allow ${hol.allow ? "checked" : ""}><span></span>${esc(T.allow_users)}</label>`;
+    sec.querySelector("[data-allow]").addEventListener("change", (x) => (hol.allow = x.target.checked));
+    sec.querySelector("[data-school]").addEventListener("change", (x) => (hol.school = x.target.value || null));
+    sec.querySelector("[data-country]").addEventListener("change", (x) => {
+      hol.country = x.target.value || null;
+      hol.subdiv = null;
+      render();
+    });
+    sec.querySelector("[data-subdiv]")?.addEventListener("change", (x) => (hol.subdiv = x.target.value || null));
+  };
+  render();
+  return {
+    async save() {
+      if (values() === initial) return;
+      await ws({
+        type: "agenda/shared/save",
+        country: hol.country,
+        subdiv: hol.subdiv,
+        school_calendar: hol.school,
+        allow_users: hol.allow,
+      });
+    },
+  };
+}
+
+/** The same settings on their own, from the All row of the column. */
+export function sharedEditor(host, { hass, T, shared, ws }) {
+  const dlg = new Dialog(host, { title: T.holidays_title, wide: true });
+  dlg.open(
+    `<div class="shared-f" data-sec="holidays"></div>`,
+    `<span class="grow"></span><button class="btn" data-close>${esc(T.cancel)}</button><button class="btn primary" data-save>${esc(T.save)}</button>`,
+    "",
+    T.close,
+  );
+  const common = sharedFields(dlg.$('[data-sec="holidays"]'), { hass, T, shared, ws });
+  dlg.$("[data-save]").addEventListener("click", () =>
+    dlg.run(async () => {
+      await common.save();
+      dlg.close("saved");
+    }, T),
+  );
+  return { done: dlg.done };
+}
+
+/** opts: { hass, T, agenda, shared, ws, callApi, duplicate }; shared comes from agenda/list. */
+export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, duplicate }) {
+  const cfg = structuredClone(agenda.settings);
+  cfg.kind = cfg.kind || "none";
+  cfg.entities = cfg.entities || [];
+  const initialKind = cfg.kind;
+  let name = agenda.name;
+  let filter = "";
   cfg.follow_absence = cfg.follow_absence !== false;
   cfg.away_state = cfg.away_state ?? null;
   const dlg = new Dialog(host, { title: `${T.settings} · ${agenda.name}`, wide: true });
@@ -1017,10 +1121,11 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
         .join("")}</select>
       <p class="hint">${esc(T.manual_hold_hint)}</p></label>
     <section data-sec="absence"></section>
-    <details class="more"><summary>${esc(T.holidays_title)}</summary><div data-sec="holidays"></div></details>`;
-  const footer = `<button class="btn danger flat" data-del>${esc(T.delete_agenda)}</button>
-    <button class="btn flat" data-apply>${esc(T.resync_now)}</button><span class="grow"></span>
-    <button class="btn" data-close>${esc(T.cancel)}</button><button class="btn primary" data-save>${esc(T.save)}</button>`;
+    <details class="more"><summary>${esc(T.holidays_title)}</summary><div class="shared-f" data-sec="holidays"></div></details>`;
+  const footer = `<button class="btn danger flat" data-del>${esc(T.delete)}</button>
+    <button class="btn flat" data-dup>${esc(T.duplicate)}</button>
+    <button class="btn flat" data-apply>${esc(T.resync_now)}</button>
+    <span class="foot-end"><button class="btn" data-close>${esc(T.cancel)}</button><button class="btn primary" data-save>${esc(T.save)}</button></span>`;
   dlg.open(body, footer, "", T.close);
 
   const view = () => ({ ...agenda, settings: cfg });
@@ -1163,59 +1268,9 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
           rerender: sections.absence,
         });
     },
-    async holidays() {
-      const sec = dlg.$('[data-sec="holidays"]');
-      const lang = T._lang;
-      const haCountry = shared?.ha_country;
-      const country = hol.country || haCountry;
-      if (!hol.options || hol.options.for !== country) {
-        try {
-          const res = await ws({ type: "agenda/holidays/options", country: country || null });
-          hol.options = { ...res, for: country };
-        } catch (_e) {
-          hol.options = { countries: [], subdivisions: [], for: country };
-        }
-      }
-      const { countries, subdivisions } = hol.options;
-      const named = countries.map((c) => [c, regionName(c, lang)]).sort((a, b) => a[1].localeCompare(b[1], lang));
-      sec.innerHTML = `<div class="row">
-          <label class="fld sm"><span>${esc(T.country)}</span><select class="inp" data-country>
-            <option value="">${esc(haCountry ? T.ha_country(regionName(haCountry, lang)) : T.no_ha_country)}</option>
-            ${named.map(([c, n]) => `<option value="${esc(c)}" ${hol.country === c ? "selected" : ""}>${esc(n)}</option>`).join("")}
-          </select></label>
-          ${
-            subdivisions.length
-              ? `<label class="fld sm"><span>${esc(T.subdivision)}</span><select class="inp" data-subdiv>
-            <option value="">${esc(T.whole_country)}</option>
-            ${subdivisions.map((d) => `<option value="${esc(d.code)}" ${hol.subdiv === d.code ? "selected" : ""}>${esc(d.names.length ? `${d.names[d.names.length - 1]} (${d.code})` : d.code)}</option>`).join("")}
-          </select></label>`
-              : ""
-          }
-        </div>
-        <label class="fld"><span>${esc(T.school_calendar)}</span><select class="inp" data-school>
-          <option value="">${esc(T.none)}</option>
-          ${Object.values(hass.states)
-            .filter((x) => x.entity_id.startsWith("calendar."))
-            .sort((a, b) => friendlyName(hass, a.entity_id).localeCompare(friendlyName(hass, b.entity_id)))
-            .map(
-              (c) =>
-                `<option value="${esc(c.entity_id)}" ${hol.school === c.entity_id ? "selected" : ""}>${esc(friendlyName(hass, c.entity_id))}</option>`,
-            )
-            .join("")}
-        </select></label>
-        <p class="hint">${esc(T.school_calendar_hint)}</p>
-        <label class="tgl"><input type="checkbox" data-allow ${hol.allow ? "checked" : ""}><span></span>${esc(T.allow_users)}</label>`;
-      sec.querySelector("[data-allow]").addEventListener("change", (x) => (hol.allow = x.target.checked));
-      sec.querySelector("[data-school]").addEventListener("change", (x) => (hol.school = x.target.value || null));
-      sec.querySelector("[data-country]").addEventListener("change", (x) => {
-        hol.country = x.target.value || null;
-        hol.subdiv = null;
-        sections.holidays();
-      });
-      sec.querySelector("[data-subdiv]")?.addEventListener("change", (x) => (hol.subdiv = x.target.value || null));
-    },
   };
   Object.values(sections).forEach((fn) => fn());
+  const common = sharedFields(dlg.$('[data-sec="holidays"]'), { hass, T, shared, ws });
 
   dlg.$("[data-name]").addEventListener("input", (x) => (name = x.target.value));
   dlg.$("[data-resync]").addEventListener("change", (x) => (cfg.resync_on_start = x.target.checked));
@@ -1239,15 +1294,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
         away_state: cfg.kind === "none" ? null : (cfg.away_state ?? null),
       },
     });
-    if (JSON.stringify([hol.country, hol.subdiv, hol.school, hol.allow]) !== holInitial) {
-      await ws({
-        type: "agenda/shared/save",
-        country: hol.country,
-        subdiv: hol.subdiv,
-        school_calendar: hol.school,
-        allow_users: hol.allow,
-      });
-    }
+    await common.save();
   };
   dlg.$("[data-save]").addEventListener("click", () =>
     dlg.run(async () => {
@@ -1260,6 +1307,12 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi }) {
       await save();
       await ws({ type: "agenda/resync", entry_id: agenda.entry_id });
       dlg.close("saved");
+    }, T),
+  );
+  dlg.$("[data-dup]").addEventListener("click", () =>
+    dlg.run(async () => {
+      // closed without a result: the panel shows the copy itself
+      if (!(await duplicate(() => dlg.close(null)))) dlg.busy(false);
     }, T),
   );
   dlg.$("[data-del]").addEventListener("click", async () => {
@@ -1299,6 +1352,8 @@ export const DIALOG_STYLES = `
   .xcal-list { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
   .xcal-row .dot { margin-left: 4px; }
   .grow { flex: 1; }
+  .foot-end { display: flex; gap: 8px; margin-left: auto; }
+  .shared-f { display: flex; flex-direction: column; gap: 12px; }
   .fld { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .fld > span { font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--secondary-text-color); }
   .fld > span em { text-transform: none; font-weight: 400; font-style: normal; color: var(--primary-color); }

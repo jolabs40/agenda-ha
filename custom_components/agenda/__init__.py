@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from . import websocket
 from .const import (
+    COPY_OF,
     DOMAIN,
     PANEL_ELEMENT,
     PANEL_URL,
@@ -101,6 +102,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     agendas: dict[str, Agenda] = hass.data[DOMAIN]["agendas"]
     agenda = Agenda(hass, entry, index=len(agendas))
     await agenda.async_load()
+    if COPY_OF in entry.data:
+        if source := agendas.get(entry.data[COPY_OF]):
+            await agenda.async_copy_from(source)
+        hass.config_entries.async_update_entry(entry, data={})
     agendas[entry.entry_id] = agenda
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

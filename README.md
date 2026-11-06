@@ -32,9 +32,14 @@ agenda goes back to its default state.
   - List: all events and how they repeat.
 - On a wide screen the agendas are listed in a column, as in the Calendar panel: tick the ones to
   show, see what each one is doing and its next change, pause it or open its settings. On a phone,
-  chips at the top do the same. The Add event button sits at the bottom right.
+  chips at the top do the same. The Add event button sits at the bottom right. The panel opens on
+  the last tab picked, browser by browser, and the gear on the All row leads to the shared settings.
+- Duplicate, in the settings of an agenda, makes a copy of it: same settings, same events, without
+  the devices, to pick next.
 - Other calendars of Home Assistant (school holidays, a family calendar...) can be ticked in the
   same column and show hatched in the week, month and house views, for information only.
+- An event can last several days, from one date and time to another, repeated or not. Its
+  exceptions look at the day it starts.
 - Events repeat every N days, weeks (on chosen weekdays, or on even or odd weeks only) or months
   (on the same date, on the 2nd Monday, on the last Friday...), optionally until a date. Single
   days can be removed from or added to a series.
@@ -49,6 +54,8 @@ agenda goes back to its default state.
   Public holidays can be one of these calendars, for an event that runs on home office days or on
   public holidays. A calendar can also count only its events containing a text, such as the red
   days of an electricity tariff calendar.
+  An event's own agenda can be one of them too: a repeated Friday gives way to a week of leave set
+  in the same agenda. Only the events that do not depend on it count then.
 - A school holiday calendar can be set once for all agendas. Each repeating event then applies
   always, only during school term, or only during school holidays, and the week view marks the
   holidays.

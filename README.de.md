@@ -38,9 +38,14 @@ auf Deutsch eingestellt ist.
 - Auf einem breiten Bildschirm stehen die Agenden in einer Spalte, wie im Kalender-Panel: die
   anzuzeigenden ankreuzen, sehen, was jede gerade tut und wann sie wechselt, sie pausieren oder ihre
   Einstellungen öffnen. Auf dem Telefon erledigen das Chips oben. Der Knopf Termin hinzufügen sitzt
-  unten rechts.
+  unten rechts. Das Panel öffnet sich je Browser mit dem zuletzt gewählten Reiter, und das Zahnrad
+  in der Zeile Alle führt zu den gemeinsamen Einstellungen.
+- Duplizieren, in den Einstellungen einer Agenda, legt eine Kopie an: gleiche Einstellungen, gleiche
+  Termine, ohne die Geräte, die danach gewählt werden.
 - Andere Kalender von Home Assistant (Schulferien, ein Familienkalender...) lassen sich in derselben
   Spalte ankreuzen und erscheinen schraffiert in Woche, Monat und Haus, nur zur Information.
+- Ein Termin kann mehrere Tage dauern, von einem Datum und einer Uhrzeit bis zu anderen, wiederholt
+  oder nicht. Seine Ausnahmen richten sich nach dem Tag, an dem er beginnt.
 - Wiederholung alle N Tage, Wochen (an gewählten Wochentagen, oder nur in geraden oder ungeraden
   Wochen) oder Monate (am gleichen Datum, am 2. Montag, am letzten Freitag...), auf Wunsch bis zu
   einem Datum. Einzelne Tage lassen sich aus einer Serie entfernen oder hinzufügen.
@@ -56,6 +61,8 @@ auf Deutsch eingestellt ist.
   Die Feiertage können einer dieser Kalender sein, für einen Termin, der an Homeoffice-Tagen oder
   an Feiertagen läuft. Ein Kalender kann auch nur seine Termine mit einem bestimmten Text zählen,
   etwa die teuren Tage eines Stromtarif-Kalenders.
+  Auch die eigene Agenda des Termins kann einer davon sein: ein wiederholter Freitag weicht einer
+  Urlaubswoche in derselben Agenda. Dann zählen nur die Termine, die nicht von ihr abhängen.
 - Ein Kalender der Schulferien wird einmal für alle Agenden gewählt. Jeder wiederholte Termin gilt
   dann immer, nur in der Schulzeit oder nur in den Schulferien, und die Wochenansicht markiert die
   Ferien.

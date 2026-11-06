@@ -370,10 +370,24 @@ export function sunLabel(anchor, T) {
   return parts.join(", ");
 }
 
+/** Beyond a day, the times of an occurrence mean nothing without their days. */
+export function longRange(s, e, lang) {
+  if (e - s <= DAY) return null;
+  const at = (m) => `${fmtDay(m, lang, { weekday: "short", day: "numeric" })} ${wallTime(m)}`;
+  return `${at(s)} – ${at(e)}`;
+}
+
 export function timeSummary(event, T) {
   if (event.all_day) return T.all_day;
   const s = wm(event.start);
   const e = wm(event.end);
+  if (e - s > DAY) {
+    const repeats = (event.repeat?.freq || "none") !== "none";
+    const opts = repeats ? { weekday: "short" } : { weekday: "short", day: "numeric", month: "short" };
+    const from = event.start_sun ? sunLabel(event.start_sun, T) : wallTime(s);
+    const to = event.end_sun ? sunLabel(event.end_sun, T) : wallTime(e);
+    return `${fmtDay(s, T._lang, opts)} ${from} → ${fmtDay(e, T._lang, opts)} ${to}`;
+  }
   const nd = dayOf(e) > dayOf(s) && e - dayOf(e) > 0 ? ` (${T.next_day})` : "";
   const from = event.start_sun ? sunLabel(event.start_sun, T) : wallTime(s);
   const to = event.end_sun ? sunLabel(event.end_sun, T) : wallTime(e) === "00:00" ? "24:00" : wallTime(e);

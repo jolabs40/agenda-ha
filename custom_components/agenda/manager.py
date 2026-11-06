@@ -626,7 +626,10 @@ class Agenda:
         by_calendar: dict[str, list[str]] = {}
         for key in sorted(keys):
             by_calendar.setdefault(recurrence.text_of_key(key)[0], []).append(key)
+        own = self.agenda_entities().get("calendar")
         for entity_id, entity_keys in by_calendar.items():
+            if entity_id == own:
+                continue
             if self.hass.states.get(entity_id) is None:
                 for key in entity_keys:
                     found[key] = self._calendar_days.get(key, set())
@@ -656,6 +659,11 @@ class Agenda:
                 found[key] = recurrence.calendar_days(
                     ((str(e["start"]), str(e["end"])) for e in events if recurrence.event_has_text(e, text)), tz
                 )
+        if own in by_calendar:
+            ctx = self.context(found)
+            for key in by_calendar[own]:
+                text = recurrence.text_of_key(key)[1]
+                found[key] = recurrence.own_calendar_days(self.events, own, text, self.label, tz, start_dt, end_dt, ctx)
         return found, complete
 
     async def async_refresh_calendars(self, apply: bool = True) -> None:
@@ -695,6 +703,8 @@ class Agenda:
         if self.condition_keys() != set(self._calendar_days):
             # a new condition calendar must be read before deciding anything
             self._track_calendars(refresh=False)
+            await self.async_refresh_calendars(apply=False)
+        elif self.agenda_entities().get("calendar") in self.condition_calendars():
             await self.async_refresh_calendars(apply=False)
         self._track_conditions()
         self._last = dt_util.utcnow()
@@ -805,6 +815,13 @@ class Agenda:
             before, _ = self.desired()
             self.control.assume(before)
         await self._async_changed(before)
+
+    async def async_copy_from(self, source: Agenda) -> None:
+        """Take the events and settings of another agenda, except its colour and its
+        devices: two agendas on one device would fight over it."""
+        self.settings = {**copy.deepcopy(source.settings), "color": self.settings["color"], "entities": []}
+        self.events = copy.deepcopy(source.events)
+        await self.async_save()
 
     async def async_set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled

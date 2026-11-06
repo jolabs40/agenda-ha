@@ -16,14 +16,16 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
+from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
 from . import devices, recurrence
-from .const import DOMAIN, SIGNAL_UPDATED
+from .const import COPY_OF, DOMAIN, SIGNAL_UPDATED
 from .manager import MANUAL_HOLDS, Agenda
 from .migration import COLOR, upgrade_repeat
 from .shared import Shared
@@ -277,6 +279,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_delete_event,
         ws_detach,
         ws_save_settings,
+        ws_duplicate,
         ws_set_enabled,
         ws_override,
         ws_resync,
@@ -444,6 +447,28 @@ async def ws_save_settings(hass: HomeAssistant, connection: websocket_api.Active
     async def run():
         settings = SETTINGS_SCHEMA(msg["settings"])
         await _agenda(hass, msg["entry_id"]).async_save_settings(settings, msg.get("name"), msg["apply"])
+
+    await _guard(connection, msg, run)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "agenda/duplicate",
+        vol.Required("entry_id"): cv.string,
+        vol.Required("name"): cv.string,
+    }
+)
+@websocket_api.async_response
+async def ws_duplicate(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def run():
+        source = _agenda(hass, msg["entry_id"])
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data={"name": msg["name"], COPY_OF: source.entry_id}
+        )
+        if result["type"] is not FlowResultType.CREATE_ENTRY:
+            raise HomeAssistantError(result.get("reason") or "not created")
+        return {"entry_id": result["result"].entry_id}
 
     await _guard(connection, msg, run)
 

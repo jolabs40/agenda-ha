@@ -7,7 +7,22 @@ const kinds = await import(`./agenda-kinds.js${V}`);
 const views = await import(`./agenda-views.js${V}`);
 const dialogs = await import(`./agenda-dialogs.js${V}`);
 
-const { DAY, dayOf, esc, mondayOf, nowWall, textColor, wall, wallDate, weekday, wm, fmtDay, fmtRange, texts } = lib;
+const {
+  DAY,
+  dayOf,
+  esc,
+  longRange,
+  mondayOf,
+  nowWall,
+  textColor,
+  wall,
+  wallDate,
+  weekday,
+  wm,
+  fmtDay,
+  fmtRange,
+  texts,
+} = lib;
 
 const PREFS_KEY = "agenda-panel-prefs";
 const SNAP = 15;
@@ -37,6 +52,8 @@ class AgendaPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     const prefs = loadPrefs();
     this._view = prefs.view || "week";
+    // the view the panel opens on: the last tab picked, not a click through to a week
+    this._opening = this._view;
     // agendas left out of the views; older preferences name the single agenda shown instead
     this._hidden = new Set(Array.isArray(prefs.hidden) ? prefs.hidden : []);
     this._only = Array.isArray(prefs.hidden) ? null : prefs.selected;
@@ -273,7 +290,7 @@ class AgendaPanel extends HTMLElement {
   }
 
   _savePrefs() {
-    savePrefs({ view: this._view, hidden: [...this._hidden], calendars: [...this._cals] });
+    savePrefs({ view: this._opening, hidden: [...this._hidden], calendars: [...this._cals] });
   }
 
   /** Calendars of Home Assistant that are not agendas: shown for information, never used. */
@@ -412,7 +429,8 @@ class AgendaPanel extends HTMLElement {
       agendas.length > 1
         ? `<div class="sa all"><button class="cb-btn" data-check-all role="checkbox" aria-checked="${state === "on"}" aria-label="${esc(T.all)}">${box(state, "var(--primary-color)", "var(--text-primary-color, #fff)")}</button>
           <span class="sa-kind"></span>
-          <button class="sa-name" data-check-all><b>${esc(T.all)}</b></button></div>`
+          <button class="sa-name" data-check-all><b>${esc(T.all)}</b></button>
+          ${this._isAdmin() ? `<button class="ic sm keep" data-shared title="${esc(T.holidays_title)}" aria-label="${esc(T.holidays_title)}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}</div>`
         : "";
     const others = this._otherCalendars();
     const ext = others.length
@@ -650,9 +668,12 @@ class AgendaPanel extends HTMLElement {
     });
   }
 
-  async _setView(view) {
+  async _setView(view, remember = true) {
     this._view = view;
-    this._savePrefs();
+    if (remember) {
+      this._opening = view;
+      this._savePrefs();
+    }
     await this._loadOcc();
     this._renderAll();
   }
@@ -710,7 +731,7 @@ class AgendaPanel extends HTMLElement {
       // a name in the house view: that agenda's week
       const id = el.dataset.select;
       this._hidden = new Set(this._data.agendas.map((a) => a.entry_id).filter((x) => x !== id));
-      this._setView("week");
+      this._setView("week", false);
     } else if (hit("[data-absence-stop]")) {
       await this._try(() => this.ws({ type: "agenda/absence/set", active: false }));
       await this._load();
@@ -727,6 +748,8 @@ class AgendaPanel extends HTMLElement {
       this._newAgenda();
     } else if ((el = hit("[data-settings]"))) {
       this._openSettings(el.dataset.settings);
+    } else if (hit("[data-shared]")) {
+      this._openShared();
     } else if ((el = hit("[data-advance]"))) {
       this._try(() => this.ws({ type: "agenda/override", entry_id: el.dataset.advance, action: "next" }));
     } else if ((el = hit("[data-resume]"))) {
@@ -759,7 +782,7 @@ class AgendaPanel extends HTMLElement {
       await this._copyDay(Number(el.dataset.copyDay));
     } else if ((el = hit("[data-mo-day]"))) {
       this._anchor = Number(el.dataset.moDay);
-      this._setView("week");
+      this._setView("week", false);
     } else if ((el = hit(".seg[data-gap-day]"))) {
       if (!this._canEdit()) return;
       const track = el.closest(".hs-track");
@@ -891,8 +914,51 @@ class AgendaPanel extends HTMLElement {
         shared: this._data.shared,
         ws: (m) => this.ws(m),
         callApi: (method, path, body) => this._hass.callApi(method, path, body),
+        duplicate: (close) => this._duplicate(agenda, close),
       }),
     );
+  }
+
+  _openShared() {
+    if (!this._isAdmin()) return;
+    this._track(
+      dialogs.sharedEditor(this.dialogHost, {
+        hass: this._hass,
+        T: this.T,
+        shared: this._data.shared,
+        ws: (m) => this.ws(m),
+      }),
+    );
+  }
+
+  /** Wait for a new agenda, show it alone and open its settings: it has no devices yet. */
+  async _showNew(id) {
+    this._only = id || null;
+    // the entry sets itself up in the background: wait until the agenda is listed
+    for (let i = 0; id && i < 20; i++) {
+      const list = await this.ws({ type: "agenda/list" });
+      if (list.agendas.some((a) => a.entry_id === id)) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    await this._load();
+    if (id) this._openSettings(id);
+  }
+
+  /** Resolves with false if the user changed their mind; `close` ends the settings of the source. */
+  async _duplicate(agenda, close) {
+    const T = this.T;
+    const name = await dialogs.promptDialog(this.dialogHost, {
+      title: `${T.duplicate} · ${agenda.name}`,
+      label: T.agenda_name,
+      hint: T.duplicate_agenda_hint,
+      value: T.copy_of(agenda.name),
+      ok: { label: T.duplicate, cancel: T.cancel },
+    });
+    if (!name) return false;
+    const res = await this.ws({ type: "agenda/duplicate", entry_id: agenda.entry_id, name });
+    close();
+    await this._try(() => this._showNew(res.entry_id));
+    return true;
   }
 
   async _newAgenda() {
@@ -911,17 +977,8 @@ class AgendaPanel extends HTMLElement {
       });
       const res = await this._hass.callApi("POST", `config/config_entries/flow/${flow.flow_id}`, { name });
       if (res.type !== "create_entry") throw new Error(res.reason || res.errors?.name || "failed");
-      const id = res.result?.entry_id;
-      this._only = id || null;
-      // the entry sets itself up in the background: wait until the agenda is listed
-      for (let i = 0; id && i < 20; i++) {
-        const list = await this.ws({ type: "agenda/list" });
-        if (list.agendas.some((a) => a.entry_id === id)) break;
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-      await this._load();
       // a new agenda does nothing until it knows what it controls
-      if (id) this._openSettings(id);
+      await this._showNew(res.result?.entry_id);
     });
   }
 
@@ -1026,7 +1083,8 @@ class AgendaPanel extends HTMLElement {
     const lang = this.T._lang;
     d.tip.textContent = d.allDay
       ? fmtDay(ns, lang, { weekday: "long", day: "numeric" })
-      : `${fmtDay(ns, lang, { weekday: "short" })} ${wall(ns).slice(11)} – ${wall(ne).slice(11)}`;
+      : (longRange(ns, ne, lang) ??
+        `${fmtDay(ns, lang, { weekday: "short" })} ${wall(ns).slice(11)} – ${wall(ne).slice(11)}`);
     d.tip.style.left = `${e.clientX + 14}px`;
     d.tip.style.top = `${e.clientY + 14}px`;
   }

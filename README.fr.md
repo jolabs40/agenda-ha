@@ -37,9 +37,14 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 - Sur un grand écran, les agendas sont listés dans une colonne, comme dans le panneau Calendrier :
   on coche ceux à afficher, on voit ce que fait chacun et son prochain changement, on le suspend ou
   on ouvre ses réglages. Sur un téléphone, des pastilles en haut font de même. Le bouton Ajouter un
-  événement se trouve en bas à droite.
+  événement se trouve en bas à droite. Le panneau s'ouvre sur le dernier onglet choisi, navigateur
+  par navigateur, et la roue dentée de la ligne Tous mène aux réglages communs.
+- Dupliquer, dans les réglages d'un agenda, en fait une copie : mêmes réglages, mêmes événements,
+  sans les appareils, à choisir ensuite.
 - Les autres calendriers de Home Assistant (vacances scolaires, calendrier familial...) se cochent
   dans la même colonne et s'affichent hachurés en semaine, mois et maison, pour information.
+- Un événement peut durer plusieurs jours, d'une date et d'une heure à d'autres, répété ou non.
+  Ses exceptions regardent le jour où il commence.
 - Répétition tous les N jours, semaines (jours au choix, ou seulement les semaines paires ou
   impaires) ou mois (même date, 2e lundi, dernier vendredi...), éventuellement jusqu'à une date.
   On peut retirer ou ajouter des jours à une série.
@@ -55,6 +60,9 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   Les jours fériés peuvent être l'un de ces calendriers, pour un événement qui tourne les jours de
   télétravail ou les jours fériés. Un calendrier peut aussi ne compter que ses événements contenant
   un texte : les jours rouges du calendrier RTE Tempo, par exemple.
+  L'agenda de l'événement peut lui-même servir de condition : un vendredi répété s'efface devant une
+  semaine de congés posée dans le même agenda. Seuls comptent alors les événements qui n'en
+  dépendent pas.
 - Un calendrier des vacances scolaires se choisit une fois pour tous les agendas. Chaque événement
   répété s'applique alors toujours, seulement en période scolaire ou seulement pendant les
   vacances, et la vue Semaine signale les vacances.

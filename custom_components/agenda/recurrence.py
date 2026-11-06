@@ -547,6 +547,38 @@ def event_has_text(event: Mapping[str, Any], text: str | None) -> bool:
     return text in fold(f"{event.get('summary') or ''} {event.get('description') or ''}")
 
 
+def own_calendar_days(
+    events: list[dict[str, Any]],
+    calendar: str,
+    text: str | None,
+    label: Callable[[dict[str, Any]], str],
+    tz: tzinfo,
+    start: datetime,
+    end: datetime,
+    ctx: Context,
+) -> set[date]:
+    """Busy days of an agenda's own calendar, for those of its events that depend on it.
+
+    Such an event would take itself off the calendar, come back at the next read, and so on:
+    the events with this calendar among their conditions do not count.
+    """
+    plain = [
+        event
+        for event in events
+        if calendar not in {text_of_key(key)[0] for key in condition_keys(event)}
+        and event_has_text({"summary": label(event), "description": event.get("note")}, text)
+    ]
+    return calendar_days(
+        (
+            (occ.start.astimezone(tz).date().isoformat(), occ.end.astimezone(tz).date().isoformat())
+            if occ.all_day
+            else (occ.start.isoformat(), occ.end.isoformat())
+            for occ in all_occurrences(plain, tz, start, end, ctx)
+        ),
+        tz,
+    )
+
+
 def calendar_days(events: Iterable[tuple[str, str]], tz: tzinfo) -> set[date]:
     """Local days covered by (start, end) pairs from calendar.get_events.
 

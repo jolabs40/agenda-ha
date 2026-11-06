@@ -31,6 +31,9 @@ CALENDAR_PAST = timedelta(days=7)
 CALENDAR_FUTURE = timedelta(days=120)
 CALENDAR_REFRESH = timedelta(minutes=30)
 
+# in the data of a new entry: the agenda to copy, read once when it is set up
+COPY_OF = "copy_of"
+
 # colours given in turn to new agendas
 PALETTE = [
     "#ef6c00",
