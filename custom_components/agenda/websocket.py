@@ -25,7 +25,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
 
 from . import devices, recurrence
-from .const import COPY_OF, DOMAIN, SIGNAL_UPDATED
+from .const import COPY_OF, DOMAIN, PREHEAT_LIMIT_MAX, PREHEAT_LIMIT_MIN, SIGNAL_UPDATED
 from .manager import MANUAL_HOLDS, Agenda
 from .migration import COLOR, upgrade_repeat
 from .shared import Shared
@@ -41,6 +41,10 @@ def _drop_unset(state: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in state.items() if value is not None}
 
 
+# the entity a setpoint or a value follows; the fixed value stays for when it has none
+SOURCE = {vol.Optional("source"): vol.Any(None, cv.entity_domain(list(devices.SOURCE_DOMAINS)))}
+
+
 STATE_SCHEMA = vol.Any(
     None,
     vol.All(
@@ -50,6 +54,7 @@ STATE_SCHEMA = vol.Any(
                 # 4 to 35 °C, or 39 to 95 °F
                 vol.Required("temperature"): vol.All(vol.Coerce(float), vol.Range(min=4, max=95)),
                 **CLIMATE_EXTRAS,
+                **SOURCE,
             }
         ),
         _drop_unset,
@@ -78,7 +83,10 @@ STATE_SCHEMA = vol.Any(
         }
     ),
     vol.Schema({vol.Required("type"): "option", vol.Required("option"): cv.string}),
-    vol.Schema({vol.Required("type"): "value", vol.Required("value"): vol.Coerce(float)}),
+    vol.All(
+        vol.Schema({vol.Required("type"): "value", vol.Required("value"): vol.Coerce(float), **SOURCE}),
+        _drop_unset,
+    ),
 )
 
 
@@ -212,6 +220,11 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("away_state"): STATE_SCHEMA,
         vol.Optional("manual_hold"): vol.In(MANUAL_HOLDS),
         vol.Optional("presence_jitter"): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
+        vol.Optional("preheat"): bool,
+        vol.Optional("preheat_max_minutes"): vol.All(
+            vol.Coerce(int), vol.Range(min=PREHEAT_LIMIT_MIN, max=PREHEAT_LIMIT_MAX)
+        ),
+        vol.Optional("temperature_sensor"): vol.Any(None, cv.entity_domain("sensor")),
     }
 )
 
@@ -283,6 +296,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_set_enabled,
         ws_override,
         ws_resync,
+        ws_reset_learning,
         ws_holiday_options,
         ws_save_shared,
         ws_sun,
@@ -528,11 +542,29 @@ async def ws_resync(hass: HomeAssistant, connection: websocket_api.ActiveConnect
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "agenda/preheat/reset",
+        vol.Required("entry_id"): cv.string,
+        vol.Optional("climate"): cv.entity_id,
+    }
+)
+@websocket_api.async_response
+async def ws_reset_learning(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    async def run():
+        _agenda(hass, msg["entry_id"]).reset_learning(msg.get("climate"))
+
+    await _guard(connection, msg, run)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "agenda/shared/save",
         vol.Optional("country", default=None): vol.Any(None, vol.All(str, vol.Length(min=2, max=3))),
         vol.Optional("subdiv", default=None): vol.Any(None, str),
         vol.Optional("school_calendar", default=None): vol.Any(None, cv.entity_domain("calendar")),
         vol.Optional("allow_users"): bool,
+        # left out by a page from an older version: kept as it is
+        vol.Optional("outdoor_sensor"): vol.Any(None, cv.entity_domain(["sensor", "weather"])),
     }
 )
 @websocket_api.async_response
@@ -544,7 +576,8 @@ async def ws_save_shared(hass: HomeAssistant, connection: websocket_api.ActiveCo
             options = await shared.async_options(country)
             if country not in options["countries"]:
                 raise HomeAssistantError(f"unknown country: {country}")
-        await shared.async_set(country, msg["subdiv"], msg["school_calendar"], msg.get("allow_users"))
+        outdoor = msg.get("outdoor_sensor", shared.outdoor_sensor)
+        await shared.async_set(country, msg["subdiv"], msg["school_calendar"], msg.get("allow_users"), outdoor)
         for agenda in _agendas(hass).values():
             await agenda.async_context_changed()
 

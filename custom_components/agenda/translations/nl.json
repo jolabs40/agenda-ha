@@ -28,6 +28,9 @@
       },
       "next_change": {
         "name": "Volgende wijziging"
+      },
+      "heating_rate": {
+        "name": "Opwarmsnelheid"
       }
     }
   },
@@ -105,6 +108,16 @@
     "resume": {
       "name": "Schema hervatten",
       "description": "Beëindigt de afwijking en neemt de met de hand gewijzigde apparaten weer over."
+    },
+    "reset_learning": {
+      "name": "Geleerde wissen",
+      "description": "Vergeet de opwarm- en koelsnelheden die de agenda heeft geleerd.",
+      "fields": {
+        "climate": {
+          "name": "Thermostaat",
+          "description": "Alleen deze thermostaat. Leeg laten voor alle."
+        }
+      }
     }
   },
   "issues": {

@@ -134,6 +134,11 @@ class Occurrence:
         return self.end - self.start
 
 
+def wall(point: datetime, tz: tzinfo) -> str:
+    """Format as naive local time, e.g. 2026-11-02T21:30."""
+    return point.astimezone(tz).strftime("%Y-%m-%dT%H:%M")
+
+
 def parse_point(value: str) -> datetime:
     """Parse "2026-11-02" or "2026-11-02T21:30[:00]" into a naive datetime."""
     value = value.strip()

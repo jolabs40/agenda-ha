@@ -6,6 +6,7 @@ const lib = await import(`./agenda-lib.js${V}`);
 const kinds = await import(`./agenda-kinds.js${V}`);
 const views = await import(`./agenda-views.js${V}`);
 const dialogs = await import(`./agenda-dialogs.js${V}`);
+const { preheatNote } = await import(`./agenda-preheat.js${V}`);
 
 const {
   DAY,
@@ -29,6 +30,9 @@ const SNAP = 15;
 const LONG_PRESS_MS = 450;
 // from this panel width the agendas get a column of their own, as in the Calendar panel
 const WIDE = 960;
+// what a drag allows for that column; the views keep their own width next to it in the stylesheet
+const SIDE_MIN = 240;
+const SIDE_MAX = 520;
 
 function loadPrefs() {
   try {
@@ -61,6 +65,7 @@ class AgendaPanel extends HTMLElement {
     this._cals = new Set(Array.isArray(prefs.calendars) ? prefs.calendars : []);
     this._ext = {};
     this._wide = false;
+    this._sideW = Number(prefs.side) || null; // null: the width of the stylesheet
     this._anchor = null; // day shown (wall minutes)
     this._data = null;
     this._occ = {};
@@ -148,6 +153,7 @@ class AgendaPanel extends HTMLElement {
       </div>
       <div class="main">
         <aside class="side" data-side hidden></aside>
+        <div class="side-grip" data-grip hidden title="${esc(this.T.side_resize)}"></div>
         <div class="pane">
           <div class="bar" data-bar></div>
           <div class="away" data-away hidden></div>
@@ -157,6 +163,7 @@ class AgendaPanel extends HTMLElement {
         </div>
       </div>
       <div id="dialog"></div>`;
+    this._setSide(this._sideW);
     this._bind();
     this._subscribe();
     await this._load();
@@ -290,7 +297,7 @@ class AgendaPanel extends HTMLElement {
   }
 
   _savePrefs() {
-    savePrefs({ view: this._opening, hidden: [...this._hidden], calendars: [...this._cals] });
+    savePrefs({ view: this._opening, hidden: [...this._hidden], calendars: [...this._cals], side: this._sideW });
   }
 
   /** Calendars of Home Assistant that are not agendas: shown for information, never used. */
@@ -386,7 +393,9 @@ class AgendaPanel extends HTMLElement {
     const hass = this._hass;
     const parts = [a.state ? kinds.stateLabel(hass, a, a.state, T) : T.none];
     const off = this._offSchedule(a);
+    const early = preheatNote(a, T);
     if (off.length) parts.push(...off);
+    else if (early) parts.push(early);
     else if (a.next_change) {
       const n = wm(a.next_change);
       const day = dayOf(n) === dayOf(this._now()) ? "" : `${fmtDay(n, T._lang, { weekday: "short" })} `;
@@ -399,6 +408,7 @@ class AgendaPanel extends HTMLElement {
   _renderSide() {
     const side = this.shadowRoot.querySelector("[data-side]");
     side.hidden = !this._wide;
+    this.shadowRoot.querySelector("[data-grip]").hidden = !this._wide;
     if (!this._wide || !this._data) {
       side.innerHTML = "";
       return;
@@ -416,7 +426,7 @@ class AgendaPanel extends HTMLElement {
         return `<div class="sa ${on ? "" : "off"} ${a.enabled ? "" : "paused"}">
           <button class="cb-btn" data-check="${esc(a.entry_id)}" role="checkbox" aria-checked="${on}" aria-label="${esc(a.name)}">${box(on ? "on" : "", color, textColor(color))}</button>
           <ha-icon class="sa-kind" icon="${esc(kinds.kindIcon(a))}" title="${esc(T.kinds[kinds.kindOf(a)] || "")}"></ha-icon>
-          <button class="sa-name" data-solo="${esc(a.entry_id)}" title="${esc(alone ? T.show_all : T.show_only)}"><b>${esc(a.name)}</b><small>${esc(this._summary(a))}</small></button>
+          <button class="sa-name" data-solo="${esc(a.entry_id)}" title="${esc(`${a.name}\n${alone ? T.show_all : T.show_only}`)}"><b>${esc(a.name)}</b><small>${esc(this._summary(a))}</small></button>
           <label class="tgl sm" title="${esc(a.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(a.entry_id)}" ${a.enabled ? "checked" : ""}><span></span></label>
           ${this._canSteer(a) && this._offSchedule(a).length ? `<button class="ic sm keep" data-resume="${esc(a.entry_id)}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}
           ${this._canSteer(a) && a.next_change ? `<button class="ic sm" data-advance="${esc(a.entry_id)}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}
@@ -578,6 +588,10 @@ class AgendaPanel extends HTMLElement {
         `<span class="st-next">${esc(T.next)} ${esc(day)}${esc(T.at)} ${esc(wall(n).slice(11))}${nextText ? ` <span class="st-chip" style="--c:${esc(nextColor || "var(--divider-color)")}">${esc(nextText)}</span>` : ""}</span>`,
       );
     }
+    if (preheatNote(sel, T))
+      parts.push(
+        `<span class="st-pre"><ha-icon icon="mdi:thermometer-chevron-up"></ha-icon>${esc(preheatNote(sel, T))}</span>`,
+      );
     if (!sel.enabled)
       parts.push(`<span class="st-paused"><ha-icon icon="mdi:lock-outline"></ha-icon>${esc(T.paused)}</span>`);
     const off = withState ? this._offSchedule(sel) : [];
@@ -666,6 +680,44 @@ class AgendaPanel extends HTMLElement {
     root.addEventListener("touchmove", (e) => this._drag?.armed && e.cancelable && e.preventDefault(), {
       passive: false,
     });
+    const grip = root.querySelector("[data-grip]");
+    grip.addEventListener("pointerdown", (e) => this._dragSide(e));
+    grip.addEventListener("dblclick", () => {
+      this._setSide(null);
+      this._sideDone();
+    });
+  }
+
+  _setSide(width) {
+    this._sideW = width && Math.round(Math.min(SIDE_MAX, Math.max(SIDE_MIN, width)));
+    const main = this.shadowRoot.querySelector(".main");
+    if (this._sideW) main.style.setProperty("--side-w", `${this._sideW}px`);
+    else main.style.removeProperty("--side-w");
+  }
+
+  _sideDone() {
+    this._savePrefs();
+    // the labels of the blocks are fitted to their width
+    this._renderContent();
+  }
+
+  /** The capture keeps the pointer on the grip: the week under it sees neither the move nor the release. */
+  _dragSide(e) {
+    if (e.button !== 0) return;
+    const grip = e.currentTarget;
+    const from = this.shadowRoot.querySelector("[data-side]").getBoundingClientRect().width;
+    const x0 = e.clientX;
+    const move = (m) => this._setSide(from + m.clientX - x0);
+    const end = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("lostpointercapture", end);
+      grip.classList.remove("on");
+      this._sideDone();
+    };
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add("on");
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("lostpointercapture", end);
   }
 
   async _setView(view, remember = true) {
@@ -1222,8 +1274,12 @@ const STYLES = `
   .fab:focus-visible { outline: 2px solid var(--primary-text-color); outline-offset: 3px; }
   .fab ha-icon { --mdc-icon-size: 24px; }
   .fab-on .card:not(.hs-card)::after { content: ""; display: block; height: 92px; }
-  .side { flex: none; width: 288px; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px;
+  .side { flex: none; width: min(var(--side-w, 288px), calc(100% - 640px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px;
     overflow-y: auto; border-right: 1px solid var(--divider-color); }
+  .side-grip { flex: none; position: relative; z-index: 2; width: 10px; margin: 0 -7px 0 -3px; cursor: col-resize; touch-action: none; }
+  .side-grip::after { content: ""; position: absolute; inset: 0 auto 0 2px; width: 2px; background: var(--primary-color); opacity: 0; transition: opacity .15s; }
+  .side-grip:hover::after, .side-grip.on::after { opacity: 1; }
+  @media (pointer: coarse) { .side-grip { width: 22px; margin: 0 -13px 0 -9px; } .side-grip::after { left: 8px; } }
   .sa { display: flex; align-items: center; gap: 2px; padding: 2px 4px 2px 0; border-radius: 10px; }
   .sa:hover { background: var(--agenda-hover); }
   .sa.all { margin-bottom: 4px; }
@@ -1285,7 +1341,8 @@ const STYLES = `
   .acts { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; }
   .status { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; padding: 2px 18px 10px; font-size: 13.5px; color: var(--secondary-text-color); }
   .status b { color: var(--primary-text-color); }
-  .st-now, .st-next, .st-live, .st-off, .st-act { display: inline-flex; align-items: center; gap: 6px; }
+  .st-now, .st-next, .st-live, .st-off, .st-pre, .st-act { display: inline-flex; align-items: center; gap: 6px; }
+  .st-pre ha-icon { --mdc-icon-size: 16px; }
   .st-off { color: var(--warning-color, #f57c00); }
   .st-off ha-icon, .st-act ha-icon { --mdc-icon-size: 16px; }
   .st-act { flex-wrap: wrap; }

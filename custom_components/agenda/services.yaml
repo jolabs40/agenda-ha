@@ -73,6 +73,18 @@ resume:
       integration: agenda
       domain: calendar
 
+reset_learning:
+  target:
+    entity:
+      integration: agenda
+      domain: calendar
+  fields:
+    climate:
+      example: climate.living_room
+      selector:
+        entity:
+          domain: climate
+
 set_absence:
   fields:
     until:

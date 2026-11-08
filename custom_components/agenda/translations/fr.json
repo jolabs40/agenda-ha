@@ -28,6 +28,9 @@
       },
       "next_change": {
         "name": "Prochain changement"
+      },
+      "heating_rate": {
+        "name": "Vitesse de chauffe"
       }
     }
   },
@@ -105,6 +108,16 @@
     "resume": {
       "name": "Reprendre le planning",
       "description": "Met fin à la dérogation et reprend les appareils réglés à la main."
+    },
+    "reset_learning": {
+      "name": "Réinitialiser l'apprentissage",
+      "description": "Oublie les vitesses de chauffe et de refroidissement apprises par l'agenda.",
+      "fields": {
+        "climate": {
+          "name": "Thermostat",
+          "description": "Seulement ce thermostat. Laisser vide pour tous."
+        }
+      }
     }
   },
   "issues": {

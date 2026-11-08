@@ -82,6 +82,17 @@ AVAILABLE_DELAY_S = 10
 CHECK_DELAY_S = 15
 CHECK_MOVING_TRIES = 8
 
+# a thermostat may be given its state early, this many minutes at most; what comes is looked
+# at again this often
+PREHEAT_LIMIT = 180
+PREHEAT_LIMIT_MIN = 15
+PREHEAT_LIMIT_MAX = 360
+PREHEAT_TICK = timedelta(minutes=5)
+REASON_PREHEAT = "preheat"
+REASON_PREHEAT_CANCEL = "preheat_cancel"
+# the entity a setpoint or a value follows changed
+REASON_SOURCE = "source"
+
 # fired for each device given a state, before the command so that the logbook names the
 # agenda as its cause, and for each device that did not follow it
 EVENT_APPLIED = f"{DOMAIN}_state_applied"

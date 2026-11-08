@@ -6,7 +6,7 @@ La programmation par calendrier pour Home Assistant, dans l'esprit du plugin Age
 Chaque pièce ou appareil a son agenda, présenté comme une semaine que l'on modifie en déplaçant
 des blocs.
 
-[![Ouvrir ce dépôt dans HACS sur votre Home Assistant.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
+[![Ouvrir ce dépôt dans la Marketplace de votre Home Assistant.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
 [![Validate](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml/badge.svg)](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml)
 
 [English version](README.md) · [Deutsche Version](README.de.md) · [Nederlandse versie](README.nl.md)
@@ -38,7 +38,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   on coche ceux à afficher, on voit ce que fait chacun et son prochain changement, on le suspend ou
   on ouvre ses réglages. Sur un téléphone, des pastilles en haut font de même. Le bouton Ajouter un
   événement se trouve en bas à droite. Le panneau s'ouvre sur le dernier onglet choisi, navigateur
-  par navigateur, et la roue dentée de la ligne Tous mène aux réglages communs.
+  par navigateur, et la roue dentée de la ligne Tous mène aux réglages communs. Le bord de la
+  colonne se glisse pour l'élargir, et chaque navigateur retient aussi sa largeur.
 - Dupliquer, dans les réglages d'un agenda, en fait une copie : mêmes réglages, mêmes événements,
   sans les appareils, à choisir ensuite.
 - Les autres calendriers de Home Assistant (vacances scolaires, calendrier familial...) se cochent
@@ -53,6 +54,9 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 - Des conditions sur des entités : un événement ne prend la main que si, par exemple, quelqu'un
   est à la maison, une fenêtre est fermée ou la température extérieure est sous 5 °C ; toutes, ou
   au moins l'une d'elles.
+- Une consigne ou une valeur peut suivre une entité, un `input_number` ou un capteur modèle par
+  exemple : on la change, et chaque événement qui la suit change avec elle. La valeur de
+  l'événement reste en secours tant que l'entité n'en a pas.
 - Les jours fériés du pays peuvent être sautés, ou être les seuls jours retenus.
 - Des calendriers peuvent servir de condition : sauter les jours où ils ont un événement
   (déplacements, absences), ne garder que ceux-là, ou les deux sur le même événement. Avec plusieurs
@@ -92,6 +96,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 - Après un redémarrage, les appareils liés sont remis dans l'état prévu (désactivable par agenda),
   sauf ceux réglés à la main.
 - Une carte de tableau de bord, `custom:agenda-card`, avec un éditeur visuel.
+- Atteindre la consigne à l'heure : un thermostat démarre en avance, de ce qu'il faut pour que
+  la pièce soit à la consigne au début de l'événement. La vitesse de la pièce s'apprend toute seule.
 - Températures en °C ou en °F, selon le réglage de Home Assistant.
 - En français, anglais, allemand et néerlandais.
 
@@ -115,17 +121,21 @@ Thermostat), elle s'affiche à côté du nom du mode.
 
 ## Installation
 
-Dans HACS, chercher Agenda (ou utiliser le bouton ci-dessus), le télécharger, puis redémarrer Home
-Assistant.
+Dans Paramètres > Marketplace, chercher Agenda (ou utiliser le bouton ci-dessus) et choisir
+Installer. La configuration d'un premier agenda suit, sans redémarrage.
 
-S'il n'apparaît pas encore, l'ajouter en dépôt personnalisé : ouvrir HACS, son menu, Dépôts
-personnalisés, et ajouter `https://github.com/jolabs40/agenda-ha` avec le type Intégration.
+S'il n'apparaît pas encore, choisir Ajouter grâce à un lien et saisir
+`https://github.com/jolabs40/agenda-ha` (une connexion à GitHub est demandée).
 
-Sans HACS, décompresser `agenda.zip`, joint à la [dernière version](https://github.com/jolabs40/agenda-ha/releases/latest),
+Avant Home Assistant 2026.11, la Marketplace était l'intégration HACS : y chercher Agenda, le
+télécharger, puis redémarrer Home Assistant.
+
+Sans l'une ni l'autre, décompresser `agenda.zip`, joint à la [dernière version](https://github.com/jolabs40/agenda-ha/releases/latest),
 dans un dossier `custom_components/agenda` de la configuration (ou copier ce dossier depuis le
 dépôt), puis redémarrer Home Assistant.
 
-Ajouter ensuite l'intégration Agenda depuis Paramètres > Appareils et services. Chaque entrée est un
+Après HACS ou une copie à la main, ajouter l'intégration Agenda depuis Paramètres > Appareils et
+services. Chaque entrée est un
 agenda ; le bouton Nouvel agenda du panneau en crée d'autres. Tout le reste se règle dans le panneau
 Agenda.
 
@@ -168,6 +178,58 @@ du prochain changement (encore une fois : celui d'après), Appliquer maintenant 
 d'événement applique l'état de cet événement jusqu'à la fin de sa prochaine occurrence. Reprendre
 le planning annule les deux et reprend les appareils réglés à la main.
 
+## Atteindre la consigne à l'heure
+
+Sans ce réglage, un thermostat reçoit sa consigne au début de l'événement, et la pièce commence
+alors à chauffer. Avec Atteindre la consigne à l'heure, dans les réglages d'un agenda de thermostats,
+il démarre en avance pour que la pièce y soit à l'heure dite. Cela vaut pour toute entité `climate`
+(tête thermostatique, clim, pompe à chaleur, Versatile Thermostat), et une clim refroidit en avance
+de la même façon. Le réglage est éteint par défaut.
+
+L'agenda apprend à chaque montée la vitesse de la pièce, en °C par heure, et le temps que l'appareil
+met à démarrer, séparément pour chaque thermostat, en chauffe et en refroidissement. Il lui faut
+trois montées ; d'ici là, il compte 1,5 °C/h en chauffe, 2,5 °C/h en refroidissement et 10 minutes
+de démarrage. L'avance vaut ce démarrage plus le temps de la montée, avec 10 % de marge, sans
+dépasser l'Avance maximale (3 heures par défaut, de 15 minutes à 6 heures). Avec plusieurs
+thermostats sur un agenda, le plus lent décide et tous partent ensemble.
+
+Une montée n'est pas retenue si quelqu'un change l'appareil, s'il s'éteint ou devient indisponible,
+si sa consigne change, pendant une absence, si elle dure plus de deux fois l'avance maximale ou si
+l'écart de départ ne dépasse pas 0,5 °C. Une fenêtre ouverte se voit ainsi : l'appareil s'éteint ou
+change de consigne, ou la mesure descend.
+
+À l'heure calculée, l'état complet de l'événement s'applique : consigne, mode, ventilation,
+oscillation. Une clim éteinte s'allume donc dans le bon mode. Les actions de début restent à l'heure
+du début.
+
+| Cas | Ce que fait l'agenda |
+|---|---|
+| Événement à préréglage, mode seul ou arrêt | rien en avance, faute de consigne chiffrée |
+| Retour vers une consigne plus basse en chauffe, ou plus haute en refroidissement | rien en avance |
+| Agenda suspendu, absence, dérogation en cours, appareil réglé à la main, condition fausse | rien en avance |
+| Un autre événement a déjà commencé | il cède la place au préchauffage |
+| Un autre événement commence entre le préchauffage et le début | il garde la main jusqu'à sa fin, le préchauffage attend |
+| L'estimation baisse une fois le préchauffage lancé | il continue |
+| L'événement disparaît, sa condition devient fausse, l'absence démarre, l'agenda est suspendu | il s'arrête et l'agenda revient à l'état voulu |
+
+La mesure est celle du thermostat. Le thermomètre d'une clim ou d'une tête thermostatique est
+souvent loin de la température de la pièce : Capteur de température de la pièce la remplace par
+celle d'un capteur, et sans valeur de ce capteur rien ne part en avance. Quand la mesure dépasse
+d'ordinaire la consigne de 0,8 °C ou plus dans l'heure qui suit une montée, les réglages de l'agenda
+le signalent : elle est sans doute prise près de l'appareil, et les vitesses apprises sont trop
+rapides. Température extérieure,
+dans les réglages communs, accepte un capteur ou une entité `weather`, et corrige la vitesse apprise
+de 30 % au plus selon le temps qu'il fait.
+
+Les réglages de l'agenda montrent les vitesses apprises et un bouton pour les oublier, comme
+l'action `agenda.reset_learning` (sur le calendrier de l'agenda, `climate` pour un seul thermostat).
+Le capteur Vitesse de chauffe donne la vitesse en °C/h, avec `cool_rate`, `dead_time`, `samples` et
+`last_sample`. Le capteur Prochain changement a les attributs `preheat_start` et `preheat_minutes`
+dès que l'heure est calculée. Les vues Semaine et Maison dessinent une bande hachurée avant
+l'événement, et `agenda_state_applied` porte la raison `preheat` avec `preheat_minutes`,
+`preheat_start` et `target_time`. Le journal dit : "préchauffage par l'agenda Chambre : 20 °C pour
+07:00 (début 05:42)".
+
 ## Actions
 
 Les actions fonctionnent comme dans les automatisations, avec trois variables en plus :
@@ -203,6 +265,20 @@ la main à l'événement suivant, ou à l'état par défaut ; ses actions de fin
 Une entité qui devient indisponible garde son dernier état pendant dix minutes, redémarrage
 compris : un capteur qui décroche un instant ne change rien.
 
+La semaine dessine en pâle et barré un événement dont les conditions ne sont pas remplies en ce
+moment, comme un jour écarté par un calendrier : avec un événement par mode à la même heure, seul
+celui du mode en cours apparaît. Les jours à venir sont dessinés comme si les conditions gardaient
+leur état actuel.
+
+## Une valeur qui suit une entité
+
+La consigne d'un thermostat, ou la valeur d'un agenda Valeur, peut suivre une entité au lieu d'un
+nombre fixe : un `input_number`, un `number` ou un capteur, comme un capteur modèle qui donne une
+valeur par mode. L'appareil reçoit la valeur de l'entité au début de l'événement, puis à chacun de
+ses changements, ramenée à son pas et dans ses limites. Le nombre réglé dans l'événement reste en
+secours tant que l'entité n'en a pas ; une entité qui devient indisponible garde d'abord sa
+dernière valeur pendant dix minutes.
+
 ## Mode absence
 
 Le bouton en haut du panneau le démarre, jusqu'à une date ou jusqu'à ce qu'on l'arrête ; les
@@ -225,6 +301,7 @@ minutes choisi, avant ou après, pour que les lampes ne s'allument pas chaque jo
 | `agenda.advance` | le calendrier d'un agenda | applique tout de suite le prochain changement (Passer au suivant) |
 | `agenda.apply_event` | le calendrier d'un agenda | `event` (nom) : applique cet événement jusqu'à la fin de sa prochaine occurrence |
 | `agenda.resume` | le calendrier d'un agenda | met fin à la dérogation et reprend les appareils réglés à la main |
+| `agenda.reset_learning` | le calendrier d'un agenda | oublie les vitesses apprises, pour tous ses thermostats ou pour un seul (`climate`) |
 | `agenda.set_absence` | | `until` (facultatif) : démarre le mode absence |
 | `agenda.end_absence` | | le termine |
 | `agenda.resync` | le calendrier d'un agenda | remet les appareils dans l'état voulu maintenant, sauf ceux réglés à la main |
@@ -258,7 +335,7 @@ Chaque état donné à un appareil déclenche `agenda_state_applied` ; un appare
 toujours pas après un second essai déclenche `agenda_state_failed` et un problème dans
 Réparations. Leurs données : `agenda`, `entry_id`, `entity_id`, `state`, `label` (l'état tel que
 l'affiche le panneau), et pour `agenda_state_applied` la raison `reason` (`schedule`, `edit`,
-`resync`, `available`, `retry`...) et l'événement `event` (`id` et `name`) quand c'est un
+`resync`, `available`, `retry`, `preheat`...) et l'événement `event` (`id` et `name`) quand c'est un
 événement qui l'a fixé.
 
 ```yaml

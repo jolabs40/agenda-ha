@@ -74,6 +74,7 @@ class Shared:
         self.country: str | None = None  # None means the core country
         self.subdiv: str | None = None
         self.school_calendar: str | None = None
+        self.outdoor_sensor: str | None = None  # a sensor or a weather entity
         self._holidays = None
         # absence mode: {"until": "2026-11-10T18:00" | None} while away, else None
         self.absence: dict[str, Any] | None = None
@@ -92,6 +93,7 @@ class Shared:
         self.country = settings.get("country")
         self.subdiv = settings.get("subdiv")
         self.school_calendar = data.get("school_calendar")
+        self.outdoor_sensor = data.get("outdoor_sensor")
         self.absence = data.get("absence")
         self.allow_users = bool(data.get("allow_users", False))
         await self.async_rebuild()
@@ -112,17 +114,24 @@ class Shared:
             {
                 "holidays": {"country": self.country, "subdiv": self.subdiv},
                 "school_calendar": self.school_calendar,
+                "outdoor_sensor": self.outdoor_sensor,
                 "absence": self.absence,
                 "allow_users": self.allow_users,
             }
         )
 
     async def async_set(
-        self, country: str | None, subdiv: str | None, school_calendar: str | None, allow_users: bool | None = None
+        self,
+        country: str | None,
+        subdiv: str | None,
+        school_calendar: str | None,
+        allow_users: bool | None = None,
+        outdoor_sensor: str | None = None,
     ) -> None:
         self.country = country or None
         self.subdiv = subdiv or None
         self.school_calendar = school_calendar or None
+        self.outdoor_sensor = outdoor_sensor or None
         if allow_users is not None:
             self.allow_users = allow_users
         await self._async_save()
@@ -246,6 +255,7 @@ class Shared:
             "subdiv": self.subdiv,
             "ha_country": self.hass.config.country,
             "school_calendar": self.school_calendar,
+            "outdoor_sensor": self.outdoor_sensor,
             "absence": self.absence,
             "allow_users": self.allow_users,
         }

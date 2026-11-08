@@ -5,7 +5,7 @@
 Calendar-based scheduling for Home Assistant, inspired by the Agenda plugin of Jeedom.
 Each room or device gets its own agenda, shown as a week you can edit by dragging blocks around.
 
-[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
 [![Validate](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml/badge.svg)](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml)
 
 [Version française](README.fr.md) · [Deutsche Version](README.de.md) · [Nederlandse versie](README.nl.md)
@@ -34,6 +34,7 @@ agenda goes back to its default state.
   show, see what each one is doing and its next change, pause it or open its settings. On a phone,
   chips at the top do the same. The Add event button sits at the bottom right. The panel opens on
   the last tab picked, browser by browser, and the gear on the All row leads to the shared settings.
+  The edge of the column can be dragged to make it wider, which each browser remembers too.
 - Duplicate, in the settings of an agenda, makes a copy of it: same settings, same events, without
   the devices, to pick next.
 - Other calendars of Home Assistant (school holidays, a family calendar...) can be ticked in the
@@ -47,6 +48,9 @@ agenda goes back to its default state.
   the latest at a given time.
 - Conditions on entities: an event takes charge only while, for instance, someone is home, a
   window is closed or the outdoor temperature is below 5 °C; all of them, or at least one.
+- A setpoint or a value can follow an entity, an `input_number` or a template sensor for instance:
+  change it, and every event that follows it changes with it. The event's own value stays for when
+  the entity has none.
 - Public holidays of your country can be skipped, or used as the only days.
 - Calendars can act as conditions: skip the days with an event in them (trips, absences), keep
   only those days, or both on the same event. With several calendars, an event in one of them is
@@ -80,6 +84,8 @@ agenda goes back to its default state.
 - After a restart the linked devices are put back in the state the agenda expects (can be turned
   off per agenda), except those set by hand.
 - A dashboard card, `custom:agenda-card`, with a visual editor.
+- Reach the setpoint on time: a thermostat starts as early as needed for the room to be at its
+  setpoint when the event starts. How fast the room warms up is learned.
 - Temperatures in °C or °F, as set in Home Assistant.
 - English, French, German and Dutch.
 
@@ -103,18 +109,22 @@ to the preset names.
 
 ## Installation
 
-In HACS, search for Agenda (or use the button above), download it and restart Home Assistant.
+In Settings > Marketplace, search for Agenda (or use the button above) and select Install. The setup
+of a first agenda follows, without a restart.
 
-If it does not show up yet, add it as a custom repository: in HACS, open the menu, choose Custom
-repositories and add `https://github.com/jolabs40/agenda-ha` with the Integration type.
+If it does not show up yet, select Add from link and enter `https://github.com/jolabs40/agenda-ha`
+(this asks for a GitHub connection).
 
-Without HACS, unzip `agenda.zip` from the [latest release](https://github.com/jolabs40/agenda-ha/releases/latest)
+Before Home Assistant 2026.11, the Marketplace was the HACS integration: search for Agenda there,
+download it and restart Home Assistant.
+
+Without either, unzip `agenda.zip` from the [latest release](https://github.com/jolabs40/agenda-ha/releases/latest)
 into a `custom_components/agenda` folder of your configuration (or copy that folder from this
 repository) and restart Home Assistant.
 
-Then add the Agenda integration from Settings > Devices & services. Each entry is one agenda; more
-can be created from the panel with the New agenda button. Everything else is set up in the Agenda
-panel.
+After HACS or a copy by hand, add the Agenda integration from Settings > Devices & services. Each
+entry is one agenda; more can be created from the panel with the New agenda button. Everything else
+is set up in the Agenda panel.
 
 Requires Home Assistant 2024.7 or later. The `holidays` package is installed automatically. The
 integration icon shows from Home Assistant 2026.3.
@@ -154,6 +164,54 @@ sensor): Skip to next applies the state of the next change at once (again: the o
 now in the event editor applies that event's state until the end of its next occurrence. Resume
 the schedule cancels both, and takes back the devices set by hand.
 
+## Reach the setpoint on time
+
+Without this setting, a thermostat gets its setpoint when the event starts, and the room only
+starts warming up then. With Reach the setpoint on time, in the settings of a thermostat agenda, it
+starts early so that the room is there on time. This works with any `climate` entity (radiator
+valve, air conditioner, heat pump, Versatile Thermostat), and an air conditioner cools early the
+same way. The setting is off by default.
+
+At each rise the agenda learns how fast the room goes, in °C per hour, and how long the device takes
+to get going, for each thermostat, heating and cooling apart. It needs three rises; until then it
+counts on 1.5 °C/h heating, 2.5 °C/h cooling and 10 minutes to get going. The lead is that time plus
+the time of the rise, with a 10 % margin, up to the Longest lead (3 hours by default, from 15 minutes
+to 6 hours). With several thermostats on an agenda, the slowest one decides and they all start
+together.
+
+A rise is not kept if someone changes the device, if it goes off or unavailable, if its setpoint
+changes, during an absence, if it lasts more than twice the longest lead or if the gap at the start
+is 0.5 °C or less. An open window shows that way: the device goes off or changes its setpoint, or
+the measure falls.
+
+At the time computed, the whole state of the event applies: setpoint, mode, fan, swing. An air
+conditioner that is off therefore starts in the right mode. Start actions stay at the start.
+
+| Case | What the agenda does |
+|---|---|
+| Event with a preset, a mode only, or off | nothing early, for lack of a number to reach |
+| Way back to a lower setpoint when heating, or a higher one when cooling | nothing early |
+| Agenda paused, absence, override, device set by hand, condition false | nothing early |
+| Another event already started | it gives way to the early start |
+| Another event starts between the early start and the start | it stays in charge until it ends, the early start waits |
+| The estimate falls once the early start is under way | it goes on |
+| The event goes, its condition becomes false, the absence starts, the agenda is paused | it stops and the agenda goes back to the state it wants |
+
+The measure is the thermostat's. The thermometer of an air conditioner or a radiator valve often
+reads far from the temperature of the room: Room temperature sensor replaces it with a sensor, and
+without a value from that sensor nothing starts early. When the measure usually goes 0.8 °C or more
+past the setpoint in the hour after a rise, the settings of the agenda say so: it is probably taken
+near the device, and the learned speeds are too fast. Outdoor temperature, in the shared settings,
+takes a sensor or a `weather` entity and corrects the learned speed by 30 % at most with the weather.
+
+The settings of the agenda show the learned speeds and a button to forget them, like the
+`agenda.reset_learning` action (on the agenda's calendar, `climate` for one thermostat only). The
+Heating rate sensor gives the speed in °C/h, with `cool_rate`, `dead_time`, `samples` and
+`last_sample`. The Next change sensor has the `preheat_start` and `preheat_minutes` attributes once
+the time is computed. The Week and House views draw a hatched band before the event, and
+`agenda_state_applied` carries the reason `preheat` with `preheat_minutes`, `preheat_start` and
+`target_time`. The logbook says: "preheating by agenda Bedroom: 20 °C for 07:00 (started 05:42)".
+
 ## Actions
 
 Actions work as in automations, with three extra variables:
@@ -187,6 +245,18 @@ An event whose conditions stop holding hands over to the next event in charge, o
 state; its end actions still run. An entity that becomes unavailable keeps its last state for ten
 minutes, restarts included, so a sensor that drops out briefly changes nothing.
 
+The week draws an event whose conditions do not hold right now faded and struck through, as it
+does for a day a calendar removes: with one event per mode at the same time, only the one of the
+current mode shows. Days to come are drawn as if the conditions kept their current state.
+
+## A value that follows an entity
+
+The setpoint of a thermostat, or the value of a Value agenda, can follow an entity instead of a
+fixed number: an `input_number`, a `number` or a sensor, such as a template sensor giving a value
+per mode. The device gets the entity's value when the event starts and again each time it changes,
+brought to its step and within its bounds. The number set in the event stays for when the entity
+has none; an entity that becomes unavailable first keeps its last value for ten minutes.
+
 ## Absence mode
 
 The button at the top of the panel starts it, until a date or until it is stopped; the actions
@@ -208,6 +278,7 @@ minutes, earlier or later, so lights do not go on at the same time every day.
 | `agenda.advance` | an agenda's calendar | applies the next change now (Skip to next) |
 | `agenda.apply_event` | an agenda's calendar | `event` (name): applies that event until the end of its next occurrence |
 | `agenda.resume` | an agenda's calendar | ends the override and takes back the devices set by hand |
+| `agenda.reset_learning` | an agenda's calendar | forgets the learned speeds, of all its thermostats or of one (`climate`) |
 | `agenda.set_absence` | | `until` (optional): starts the absence mode |
 | `agenda.end_absence` | | ends it |
 | `agenda.resync` | an agenda's calendar | puts the devices back in the state the agenda wants now, except those set by hand |
@@ -240,7 +311,7 @@ actions:
 Each state given to a device fires `agenda_state_applied`; a device that still does not show it
 after a second try fires `agenda_state_failed` and gets a Repairs issue. Their data: `agenda`,
 `entry_id`, `entity_id`, `state`, `label` (the state as shown in the panel), and for
-`agenda_state_applied` the `reason` (`schedule`, `edit`, `resync`, `available`, `retry`...) and the
+`agenda_state_applied` the `reason` (`schedule`, `edit`, `resync`, `available`, `retry`, `preheat`...) and the
 `event` (`id` and `name`) when an event set it.
 
 ```yaml

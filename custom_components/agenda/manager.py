@@ -51,12 +51,17 @@ from .const import (
     DEFAULT_SETTINGS,
     DOMAIN,
     PALETTE,
+    PREHEAT_LIMIT,
+    REASON_PREHEAT_CANCEL,
+    REASON_SOURCE,
     SIGNAL_UPDATED,
     STORAGE_MINOR_VERSION,
     STORAGE_VERSION,
 )
 from .control import Control
 from .migration import migrate
+from .preheater import Preheater
+from .recurrence import wall
 from .shared import Shared
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,14 +78,11 @@ MANUAL_HOLDS = (MANUAL_NEXT_CHANGE, MANUAL_NEXT_DAY, MANUAL_NEVER, MANUAL_UNDO)
 
 # states that say nothing about a condition entity
 NO_STATE = ("unavailable", "unknown")
+# an occurrence shown aside: its entity conditions do not hold now
+CONDITIONS_UNMET = "conditions"
 
 # reasons that take every device back, hand changes included
 TAKE_BACK = ("edit", "enabled", "absence", "override", "resume", "apply")
-
-
-def wall(point: datetime, tz) -> str:
-    """Format as naive local time, e.g. 2026-11-02T21:30."""
-    return point.astimezone(tz).strftime("%Y-%m-%dT%H:%M")
 
 
 class AgendaStore(Store[dict[str, Any]]):
@@ -118,6 +120,7 @@ class Agenda:
         self._last = dt_util.utcnow()
         self._unsub_timer: Callable[[], None] | None = None
         self.control = Control(self)
+        self.preheater = Preheater(self)
         self.run_lock = asyncio.Lock()
         # condition calendars: busy local days, and the span they were read for
         self._calendar_days: dict[str, set[date]] = {}
@@ -127,6 +130,8 @@ class Agenda:
         self._refresh_pending: Callable[[], None] | None = None
         self._unsub_conditions: Callable[[], None] | None = None
         self._condition_pending: Callable[[], None] | None = None
+        # condition entities and sources that changed since the last decision
+        self._changed: set[str] = set()
         # last real state of each condition entity, and since when it has none (None: it has one)
         self._known: dict[str, tuple[str, datetime | None]] = {}
         self._unsub_wait: Callable[[], None] | None = None
@@ -173,7 +178,12 @@ class Agenda:
         return None
 
     def state_label(self, state: dict[str, Any] | None) -> str | None:
-        return devices.label(state, self.hass.config.language, self.unit())
+        return devices.label(self.follow(state), self.hass.config.language, self.unit())
+
+    def follow(self, state: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The state with the value its source has now, see devices.follow."""
+        source = (state or {}).get("source")
+        return devices.follow(state, self._condition_state(source)) if source else state
 
     def label(self, event: dict[str, Any]) -> str:
         """Event name, or its state when unnamed."""
@@ -206,6 +216,7 @@ class Agenda:
             since = moment(since) or now
             if now - since < CONDITION_WAIT:
                 self._known[entity_id] = (state, since)
+        self.preheater.load(runtime)
 
     async def async_save(self) -> None:
         await self._store.async_save({"settings": self.settings, "enabled": self.enabled, "events": self.events})
@@ -218,6 +229,7 @@ class Agenda:
             "conditions": {
                 e: [state, since.isoformat() if since else None] for e, (state, since) in self._known.items()
             },
+            **self.preheater.storage(),
         }
 
     @callback
@@ -281,12 +293,19 @@ class Agenda:
     def desired(
         self, at: datetime | None = None, override: bool = True
     ) -> tuple[dict[str, Any] | None, recurrence.Occurrence | None]:
-        at = at or dt_util.utcnow()
+        """The state wanted at this time, and the occurrence giving it. A followed value is
+        the one its entity has now, whatever the time."""
+        state, occ = self._scheduled(at or dt_util.utcnow(), override)
+        return self.follow(state), occ
+
+    def _scheduled(self, at: datetime, override: bool) -> tuple[dict[str, Any] | None, recurrence.Occurrence | None]:
         default = self.settings.get("default_state")
         if self.absent(at):
             return self.settings.get("away_state") or default, None
         if override and self.override and at < self.override["until"]:
             return self.override["state"], None
+        if (early := self.preheater.running_at(at)) is not None:
+            return early
         # conditions are read now: a future state assumes they keep their value
         events = [event for event in self.events if self.conditions_hold(event)]
         return recurrence.desired_state(events, self.tz, at, default, self.context())
@@ -298,6 +317,7 @@ class Agenda:
         self._track_calendars()
         self._track_conditions()
         self.control.track()
+        self.preheater.start()
         self._schedule_holds()
         self._unsub_absence = self.shared.async_on_absence_change(self.async_absence_changed)
         # the last states of the condition entities are written once, when Home Assistant stops
@@ -320,6 +340,7 @@ class Agenda:
         self._untrack_calendars()
         self._untrack_conditions()
         self.control.stop()
+        self.preheater.stop()
         if self._unsub_holds:
             self._unsub_holds()
             self._unsub_holds = None
@@ -342,6 +363,7 @@ class Agenda:
         if self.absent() and until is not None and (self.next_change is None or until < self.next_change):
             # what the panel shows; the shared settings end the absence themselves
             self.next_change = until
+        self.preheater.evaluate()
 
     @callback
     def _on_timer(self, _now: datetime) -> None:
@@ -563,6 +585,10 @@ class Agenda:
         if school and school in self.condition_calendars():
             keys.add(school)
         return keys
+
+    @property
+    def calendars_ready(self) -> bool:
+        return self._calendars_ready or not self.condition_calendars()
 
     def condition_calendars(self) -> set[str]:
         calendars = {
@@ -808,9 +834,15 @@ class Agenda:
             self.control.holds.clear()
             self._save_runtime()
             self._schedule_holds()
+        for key, unset in (("preheat", False), ("preheat_max_minutes", PREHEAT_LIMIT), ("temperature_sensor", None)):
+            # nor is this, and it only means something on thermostats
+            if kind != devices.KIND_CLIMATE or self.settings.get(key, unset) == unset:
+                settings.pop(key, None)
+                self.settings.pop(key, None)
         if self.linked != old_entities:
             self.control.track()
             before = {"force": True}  # newly linked entities must get the state
+        self.preheater.sync()
         if not apply:
             before, _ = self.desired()
             self.control.assume(before)
@@ -820,15 +852,23 @@ class Agenda:
         """Take the events and settings of another agenda, except its colour and its
         devices: two agendas on one device would fight over it."""
         self.settings = {**copy.deepcopy(source.settings), "color": self.settings["color"], "entities": []}
+        # the sensor of a room, as much as its thermostat
+        self.settings.pop("temperature_sensor", None)
         self.events = copy.deepcopy(source.events)
         await self.async_save()
 
     async def async_set_enabled(self, enabled: bool) -> None:
+        if not enabled:
+            # the one command of a suspended agenda: an early setpoint must not stay
+            async with self.run_lock:
+                if self.preheater.cancel():
+                    await self.async_apply_state(reason=REASON_PREHEAT_CANCEL)
         self.enabled = enabled
         await self.async_save()
         if enabled:
             async with self.run_lock:
                 await self.async_apply_state(force=True, reason="enabled")
+        self.preheater.evaluate()
         self._notify()
 
     async def async_resync(self, take_back: bool = False) -> None:
@@ -841,10 +881,18 @@ class Agenda:
     def condition_entities(self) -> set[str]:
         return {cond["entity_id"] for event in self.events for cond in event.get("conditions") or []}
 
+    def source_entities(self) -> set[str]:
+        """The entities a setpoint or a value follows."""
+        states = [event.get("state") for event in self.events]
+        states += [self.settings.get("default_state"), self.settings.get("away_state")]
+        return {state["source"] for state in states if state and state.get("source")}
+
     @callback
     def _track_conditions(self) -> None:
+        """Follow the condition entities and the sources: both change what is wanted, and a
+        source left without a state keeps its last value for a while, as a condition does."""
         self._untrack_conditions()
-        entities = self.condition_entities()
+        entities = self.condition_entities() | self.source_entities()
         self._known = {e: known for e, known in self._known.items() if e in entities}
         for entity_id in entities:
             self._remember(entity_id, self.hass.states.get(entity_id))
@@ -897,6 +945,7 @@ class Agenda:
     @callback
     def _on_condition_change(self, event: Event) -> None:
         self._remember(event.data["entity_id"], event.data.get("new_state"))
+        self._changed.add(event.data["entity_id"])
         self._schedule_wait()
         if self._condition_pending:
             self._condition_pending()
@@ -905,11 +954,15 @@ class Agenda:
     @callback
     def _on_condition_settled(self, _now: datetime) -> None:
         self._condition_pending = None
-        self.hass.async_create_background_task(self._async_reapply(), f"{DOMAIN} {self.name} condition")
+        # only sources moved: the devices get a new value, not a new state of the schedule
+        reason = "condition" if self._changed & self.condition_entities() else REASON_SOURCE
+        self._changed = set()
+        self.hass.async_create_background_task(self._async_reapply(reason), f"{DOMAIN} {self.name} condition")
 
-    async def _async_reapply(self) -> None:
+    async def _async_reapply(self, reason: str = "condition") -> None:
+        self.preheater.evaluate()
         async with self.run_lock:
-            await self.async_apply_state(reason="condition")
+            await self.async_apply_state(reason=reason)
         self._notify()
 
     async def async_absence_changed(self) -> None:
@@ -969,6 +1022,17 @@ class Agenda:
         self._notify()
 
     @callback
+    def preheat_changed(self, save: bool = True) -> None:
+        if save:
+            self._save_runtime()
+        self._notify()
+
+    def reset_learning(self, entity_id: str | None = None) -> None:
+        if entity_id is not None and entity_id not in self.linked:
+            raise HomeAssistantError(f"{entity_id} is not linked to agenda {self.name}")
+        self.preheater.reset(entity_id)
+
+    @callback
     def _notify(self) -> None:
         async_dispatcher_send(self.hass, SIGNAL_UPDATED, self.entry_id)
 
@@ -1019,6 +1083,7 @@ class Agenda:
                 for entity_id, until in self.control.holds.items()
                 if self.control.held(entity_id, now)
             },
+            "preheat": self.preheater.as_dict(),
         }
 
     def _occ_dict(self, occ: recurrence.Occurrence) -> dict[str, Any]:
@@ -1036,6 +1101,8 @@ class Agenda:
         """Occurrences over [start, end), and those a calendar condition removes, for the panel.
 
         "busy" names the condition calendars with something on the day: the week marks them.
+        Occurrences whose entity conditions do not hold now are put aside as well, as the
+        schedule does: several events at the same time, one per mode, show only the one in charge.
         """
         ctx = await self.async_context_for(start, end)
 
@@ -1048,4 +1115,11 @@ class Agenda:
             for event in self.events
             for occ, reason in recurrence.skipped(event, self.tz, start, end, ctx)
         ]
-        return [entry(occ) for occ in self.occurrences(start, end, ctx)], skipped
+        holds = {event["id"]: self.conditions_hold(event) for event in self.events}
+        found = []
+        for occ in self.occurrences(start, end, ctx):
+            if holds[occ.event_id]:
+                found.append(entry(occ))
+            else:
+                skipped.append(entry(occ, reason=CONDITIONS_UNMET))
+        return found, skipped

@@ -189,9 +189,31 @@ function canPosition(hass, agenda) {
   return list.length === 0 || list.some((s) => (s.attributes?.supported_features || 0) & 4);
 }
 
-/** Short label of a state, e.g. "20.5°", "Eco 18°", "On 60 %". */
+// a setpoint or a value may follow an entity: the field it takes from it, and the entities
+const SOURCE_FIELDS = { temperature: "temperature", value: "value" };
+const SOURCE_DOMAINS = ["input_number", "number", "sensor"];
+const TEMP_UNITS = ["°C", "°F"];
+
+const reading = (hass, id) => {
+  const raw = hass?.states?.[id]?.state;
+  return raw == null || raw === "" ? NaN : Number(raw);
+};
+
+/** A state that follows an entity, with that entity's value now; its own when the entity has none. */
+export function followed(hass, st) {
+  const field = st?.source ? SOURCE_FIELDS[st.type] : null;
+  const value = field ? reading(hass, st.source) : NaN;
+  return Number.isFinite(value) ? { ...st, [field]: value } : st;
+}
+
+/** Short label of a state, e.g. "20.5°", "Eco 18°", "On 60 %"; "Comfort · 20.5°" when it follows an entity. */
 export function stateLabel(hass, agenda, st, T, withTemp = true) {
   if (!st) return "";
+  const text = plainLabel(hass, agenda, followed(hass, st), T, withTemp);
+  return st.source && SOURCE_FIELDS[st.type] && withTemp ? `${friendlyName(hass, st.source)} · ${text}` : text;
+}
+
+function plainLabel(hass, agenda, st, T, withTemp) {
   switch (st.type) {
     case "temperature": {
       const text = `${fmtNum(st.temperature, T)}°`;
@@ -228,6 +250,7 @@ export function stateLabel(hass, agenda, st, T, withTemp = true) {
 
 export function stateColor(hass, agenda, st) {
   if (!st) return null;
+  st = followed(hass, st);
   switch (st.type) {
     case "off":
       return OFF_COLOR;
@@ -342,6 +365,34 @@ function bigValue({ value, text, color, min, max, step, minus = "-", plus = "+" 
   </div>`;
 }
 
+/** The switch to follow an entity, and the entity, under the value it replaces. */
+function followRows(hass, agenda, st, T) {
+  const on = "source" in st;
+  let html = `<label class="tgl"><input type="checkbox" data-follow ${on ? "checked" : ""}><span></span>${esc(T.follow)}</label>`;
+  if (!on) return html;
+  const own = linked(agenda);
+  const climate = kindOf(agenda) === "climate";
+  const fits = (s) => {
+    const id = s.entity_id;
+    if (!SOURCE_DOMAINS.includes(domain(id)) || own.includes(id)) return false;
+    if (domain(id) !== "sensor") return true;
+    const unit = s.attributes?.unit_of_measurement;
+    // a thermostat takes a temperature, or a plain number such as a template's
+    return Number.isFinite(reading(hass, id)) && (!climate || !unit || TEMP_UNITS.includes(unit));
+  };
+  const ids = Object.values(hass?.states || {})
+    .filter(fits)
+    .map((s) => s.entity_id)
+    .sort();
+  html += `<input class="inp" list="agenda-sources" data-source value="${esc(st.source || "")}" placeholder="${esc(T.follow_entity)}">
+    <datalist id="agenda-sources">${ids.map((id) => `<option value="${esc(id)}">${esc(friendlyName(hass, id))}</option>`).join("")}</datalist>
+    <p class="hint">${esc(T.follow_hint)}</p>`;
+  return html;
+}
+
+/** The followed entity of a state, to carry over when its value changes. */
+const keepSource = (st, type) => (st?.type === type && "source" in st ? { source: st.source } : {});
+
 /** Mode, fan and swing chips of a climate state that is not off. */
 function climateRows(hass, agenda, st, T, modes, settings) {
   const first = states(hass, agenda)[0];
@@ -383,7 +434,9 @@ export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
     );
     // air conditioners and the like; a heating-only thermostat keeps the plain picker
     const rich = modes.length > 1 || settings.length > 0;
-    html += chip("temperature", isTemp ? `${fmtNum(temp, T)}°` : T.temperature, setpointColor(hass, temp), isTemp);
+    // the chip gives the value in use, the entity's when one is followed
+    const shown = isTemp ? followed(hass, st).temperature : temp;
+    html += chip("temperature", isTemp ? `${fmtNum(shown, T)}°` : T.temperature, setpointColor(hass, shown), isTemp);
     for (const p of availablePresets(hass, agenda)) {
       const s = { type: "preset", preset: p };
       html += chip(
@@ -405,6 +458,7 @@ export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
         max: scale.slider[1],
         step: scale.step,
       });
+      extra += followRows(hass, agenda, st, T);
     }
     if (rich && st && st.type !== "off") extra += climateRows(hass, agenda, st, T, modes, settings);
   } else if (kind === "on_off") {
@@ -473,18 +527,19 @@ export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
     html += chip(
       "value",
       st?.type === "value" ? stateLabel(hass, agenda, st, T) : T.value,
-      stateColor(hass, agenda, { type: "value", value }),
+      stateColor(hass, agenda, st?.type === "value" ? st : { type: "value", value }),
       st?.type === "value",
     );
     if (st?.type === "value") {
       extra = bigValue({
         value,
         text: `${esc(fmtNum(value, T, 2))}${r.unit ? `<small>${esc(r.unit)}</small>` : ""}`,
-        color: stateColor(hass, agenda, st),
+        color: stateColor(hass, agenda, { type: "value", value }),
         min: r.min,
         max: r.max,
         step: r.step,
       });
+      extra += followRows(hass, agenda, st, T);
     }
   }
   if (allowNone) html += chip("none", noneLabel, "#e0e0e0", !st);
@@ -503,7 +558,8 @@ export function bindState(scope, { hass, agenda, T, get, set, rerender }) {
   const field = { climate: "temperature", on_off: "brightness", cover: "position", number: "value" }[kind];
   const withValue = (v) => {
     const cur = get() || {};
-    if (kind === "climate") return { ...climateExtras(cur), type: "temperature", temperature: v };
+    if (kind === "climate")
+      return { ...climateExtras(cur), ...keepSource(cur, "temperature"), type: "temperature", temperature: v };
     if (kind === "on_off") return { type: "on", brightness: Math.round(v) };
     if (kind === "cover") return { type: "position", position: Math.round(v) };
     return { ...cur, type: "value", value: v };
@@ -527,13 +583,18 @@ export function bindState(scope, { hass, agenda, T, get, set, rerender }) {
       else if (key === "temperature")
         set({
           ...climateExtras(cur),
+          ...keepSource(cur, "temperature"),
           type: "temperature",
           temperature: cur?.type === "temperature" ? cur.temperature : tempScale(hass).first,
         });
       else if (key === "mode")
         set({ ...climateExtras(cur), type: "mode", hvac_mode: cur?.hvac_mode || climateModes(hass, agenda)[0] });
       else if (key === "value")
-        set({ type: "value", value: cur?.type === "value" ? cur.value : numberRange(hass, agenda).min });
+        set({
+          ...keepSource(cur, "value"),
+          type: "value",
+          value: cur?.type === "value" ? cur.value : numberRange(hass, agenda).min,
+        });
       else if (key.startsWith("preset:")) set({ ...climateExtras(cur), type: "preset", preset: key.slice(7) });
       else if (key.startsWith("pos:")) {
         const p = Number(key.slice(4));
@@ -545,6 +606,19 @@ export function bindState(scope, { hass, agenda, T, get, set, rerender }) {
   );
   scope.querySelector("[data-bright]")?.addEventListener("change", (e) => {
     set({ type: "on", brightness: e.target.checked ? 100 : null });
+    rerender();
+  });
+  scope.querySelector("[data-follow]")?.addEventListener("change", (e) => {
+    // switched on, the state names no entity until one is chosen: it is saved without
+    const { source, ...rest } = get() || {};
+    set(e.target.checked ? { ...rest, source: source || null } : rest);
+    rerender();
+  });
+  scope.querySelector("[data-source]")?.addEventListener("change", (e) => {
+    const source = e.target.value.trim() || null;
+    // drawn again, the field leaves the page while focused, and its blur fires change once more
+    if ((get()?.source ?? null) === source) return;
+    set({ ...get(), source });
     rerender();
   });
   scope.querySelector("[data-option]")?.addEventListener("input", (e) => {
@@ -570,7 +644,8 @@ export function bindState(scope, { hass, agenda, T, get, set, rerender }) {
       const val = scope.querySelector(".temp-val");
       const unit = val.querySelector("small")?.outerHTML || "";
       val.innerHTML = `${esc(kind === "climate" || kind === "number" ? fmtNum(slider.value, T, 2) : slider.value)}${unit}`;
-      val.style.setProperty("--c", stateColor(hass, agenda, st));
+      // the colour of the value on the slider, not of the followed one
+      val.style.setProperty("--c", stateColor(hass, agenda, { ...st, source: null }));
     });
     slider.addEventListener("change", rerender);
   }

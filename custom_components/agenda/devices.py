@@ -16,11 +16,15 @@ every event state is one of the kind's state types:
     cover     {"type": "position", "position": 0..100}  # 0 closed, 100 open
     select    {"type": "option", "option": "Eco"}
     number    {"type": "value", "value": 12.5}
+
+A setpoint or a value may follow an entity, its "source": the entity's value takes the
+place of the fixed one, which is kept for when the entity has none.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any
 
 KIND_NONE = "none"
@@ -85,6 +89,58 @@ def accepts(kind: str, state: Mapping[str, Any] | None) -> bool:
     return state is None or state.get("type") in KIND_STATE_TYPES.get(kind, ())
 
 
+# entities a setpoint or a value can follow
+SOURCE_DOMAINS = ("input_number", "number", "sensor")
+# the field each state type takes from its source
+SOURCE_FIELDS = {"temperature": "temperature", "value": "value"}
+
+
+def follow(state: Mapping[str, Any] | None, reading: str | None) -> Any:
+    """The state with the value of the entity it follows, `reading` being that entity's
+    state; its own value when the entity has none."""
+    if not state or not state.get("source") or (field := SOURCE_FIELDS.get(state.get("type"))) is None:
+        return state
+    try:
+        value = float(reading)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return state
+    return {**state, field: value} if math.isfinite(value) else state
+
+
+def same_state(a: Mapping[str, Any] | None, b: Mapping[str, Any] | None) -> bool:
+    """Whether two states are the same, a followed value aside: it moves with its entity."""
+
+    def fixed(state: Mapping[str, Any] | None) -> Any:
+        field = SOURCE_FIELDS.get(state.get("type")) if state and state.get("source") else None
+        return {k: v for k, v in state.items() if k != field} if field and state else state
+
+    return fixed(a) == fixed(b)
+
+
+def fit(entity_id: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any]) -> Mapping[str, Any]:
+    """A followed value brought to the device's step and within its bounds: the entity it
+    comes from knows nothing of them."""
+    if not wanted.get("source"):
+        return wanted
+    domain = domain_of(entity_id)
+    kind = wanted.get("type")
+    if domain == "climate" and kind == "temperature":
+        low, high, step = attributes.get("min_temp"), attributes.get("max_temp"), attributes.get("target_temp_step")
+    elif domain in KIND_DOMAINS[KIND_NUMBER] and kind == "value":
+        low, high, step = attributes.get("min"), attributes.get("max"), attributes.get("step")
+    else:
+        return wanted
+    field = SOURCE_FIELDS[kind]
+    value = float(wanted[field])
+    if isinstance(step, (int, float)) and step > 0:
+        value = round(round(value / step) * step, 6)
+    if isinstance(low, (int, float)):
+        value = max(value, low)
+    if isinstance(high, (int, float)):
+        value = min(value, high)
+    return {**wanted, field: value}
+
+
 def _switch_on(
     current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any], last_mode: str | None
 ) -> Call | None:
@@ -122,6 +178,7 @@ def plan(
     `last_mode` is the last mode other than off Agenda saw on a thermostat.
     """
     domain = domain_of(entity_id)
+    wanted = fit(entity_id, attributes, wanted)
     kind = wanted.get("type")
     calls: list[Call] = []
     if attributes.get("assumed_state") and domain != "climate":
@@ -211,6 +268,7 @@ def moving(entity_id: str, current: str) -> bool:
 def reached(entity_id: str, current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any]) -> bool:
     """Whether the entity shows the wanted state. True when this cannot be told."""
     domain = domain_of(entity_id)
+    wanted = fit(entity_id, attributes, wanted)
     kind = wanted.get("type")
 
     if domain == "climate":

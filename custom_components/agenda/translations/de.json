@@ -28,6 +28,9 @@
       },
       "next_change": {
         "name": "Nächste Änderung"
+      },
+      "heating_rate": {
+        "name": "Aufheizgeschwindigkeit"
       }
     }
   },
@@ -105,6 +108,16 @@
     "resume": {
       "name": "Zeitplan fortsetzen",
       "description": "Beendet die Abweichung und übernimmt die von Hand geänderten Geräte wieder."
+    },
+    "reset_learning": {
+      "name": "Gelerntes zurücksetzen",
+      "description": "Vergisst die von der Agenda gelernten Heiz- und Kühlgeschwindigkeiten.",
+      "fields": {
+        "climate": {
+          "name": "Thermostat",
+          "description": "Nur dieses Thermostat. Leer lassen für alle."
+        }
+      }
     }
   },
   "issues": {

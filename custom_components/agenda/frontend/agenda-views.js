@@ -25,6 +25,7 @@ const {
 const { eventColor, eventLabel, hasStates, liveIcon, liveText, stateColor, stateLabel } = await import(
   `./agenda-kinds.js${V}`
 );
+const { preheatBands, preheatNote } = await import(`./agenda-preheat.js${V}`);
 
 export { liveText };
 
@@ -113,7 +114,8 @@ export function renderWeek(ctx) {
     (_, h) => `<div class="wk-h"><span>${h ? `${String(h).padStart(2, "0")}:00` : ""}</span></div>`,
   ).join("");
 
-  // pieces per day, all agendas together; ghosts are the days a calendar condition removes
+  // pieces per day, all agendas together; ghosts are the days a calendar condition removes, and
+  // the events whose entity conditions do not hold now
   const perDay = Object.fromEntries(dayList.map((d) => [d, []]));
   const ghosts = Object.fromEntries(dayList.map((d) => [d, []]));
   for (const agenda of agendas) {
@@ -131,6 +133,13 @@ export function renderWeek(ctx) {
       }
     }
   }
+  // early starts, over the blocks: what runs until then is often an event of its own
+  const earlyOf = (d) =>
+    agendas.flatMap((agenda) => {
+      const event = agenda.events.find((e) => e.id === agenda.preheat?.next?.event_id);
+      const pieces = event ? preheatBands(agenda, firstDay, days)[d] || [] : [];
+      return pieces.map((p) => ({ ...p, color: eventColor(hass, agenda, event) }));
+    });
   const timeOf = (occ) => {
     const end = wallTime(wm(occ.end));
     if (occ.all_day) return T.all_day;
@@ -197,16 +206,19 @@ export function renderWeek(ctx) {
         const h = g.to - g.from;
         const r = event.repeat || {};
         const only = occ.reason === "only";
+        // left aside by its entity conditions, as they are now, rather than by a calendar
+        const unmet = occ.reason === "conditions";
         const ids = (only || r.calendar_mode !== "only" ? r.calendars : r.except_calendars) || [];
-        const why = `${only ? T.calendar_only : T.calendar_exclude} (${ids.map(nameOf).join(", ")})`;
-        const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), timeOf(occ), T.skipped, why];
+        const why = unmet ? "" : `${only ? T.calendar_only : T.calendar_exclude} (${ids.map(nameOf).join(", ")})`;
+        const sub = unmet ? T.conditions_unmet : T.skipped;
+        const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), timeOf(occ), sub, why];
         const short = (h / 60) * hourH < 40;
         const cond = short ? "" : condHtml(event, occ);
         html += `<div class="ghost ${short ? "short" : ""} ${g.first ? "" : "cont"} ${g.last ? "" : "open"}"
             style="top:${pct(g.from)};height:${pct(h)};--c:${esc(eventColor(hass, agenda, event))}"
             data-entry="${esc(agenda.entry_id)}" data-ghost="${esc(event.id)}" title="${esc(tip.filter(Boolean).join(" · "))}">
           <div class="ev-main">${esc(mainLabel(agenda, event))}</div>
-          ${short ? "" : `<div class="ev-sub">${esc(T.skipped)}</div>`}${cond}
+          ${short ? "" : `<div class="ev-sub">${esc(sub)}</div>`}${cond}
         </div>`;
       }
       for (const p of stack(perDay[d])) {
@@ -228,6 +240,9 @@ export function renderWeek(ctx) {
           ${short ? "" : `<div class="ev-sub">${esc([prefix, subName, time].filter(Boolean).join(" · "))}</div>${condHtml(event, occ)}`}
           ${editable && !occ.all_day && p.last ? `<div class="ev-resize" data-resize="1"></div>` : ""}
         </div>`;
+      }
+      for (const p of earlyOf(d)) {
+        html += `<div class="early" style="top:${pct(p.from)};height:${pct(p.to - p.from)};--c:${esc(p.color)}"></div>`;
       }
       for (const p of stack(xCol[d])) {
         const { cal, occ } = p;
@@ -422,12 +437,20 @@ export function renderHouse(ctx) {
             ${w >= 75 && label ? `<span>${esc(label)}</span>` : ""}</div>`;
         })
         .join("");
+      const target = agenda.events.find((e) => e.id === agenda.preheat?.next?.event_id);
+      const early = (target && preheatBands(agenda, day, 1)[day]) || [];
+      const earlyHtml = early
+        .map(
+          (p) =>
+            `<div class="early" style="left:${pct(p.from)};width:${pct(p.to - p.from)};--c:${esc(eventColor(hass, agenda, target))}"></div>`,
+        )
+        .join("");
       return `<div class="hs-row ${agenda.enabled ? "" : "paused"}">
         <div class="hs-name" data-select="${esc(agenda.entry_id)}">
           <span class="dot" style="--c:${esc(agenda.settings.color)}"></span>
           <div><b>${esc(agenda.name)}</b><small><ha-icon icon="${liveIcon(agenda)}"></ha-icon><span data-live="${esc(agenda.entry_id)}">${esc(liveText(hass, agenda, T))}</span></small></div>
         </div>
-        <div class="hs-track">${segHtml}${curveOf(agenda)}</div>
+        <div class="hs-track">${segHtml}${earlyHtml}${curveOf(agenda)}</div>
       </div>`;
     })
     .join("");
@@ -495,6 +518,7 @@ export function renderNext(ctx) {
       <div class="nx-main"><b>${esc(a.name)}</b>
         <div class="nx-line">${nowChip}${next}</div>
         ${off.length ? `<div class="nx-off"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>${esc(off.join(" · "))}</div>` : ""}
+        ${preheatNote(a, T) ? `<div class="nx-pre"><ha-icon icon="mdi:thermometer-chevron-up"></ha-icon>${esc(preheatNote(a, T))}</div>` : ""}
         ${a.enabled ? "" : `<div class="nx-off">${esc(T.paused)}</div>`}
       </div>
       ${buttons ? `<div class="nx-act">${buttons}</div>` : ""}
@@ -564,6 +588,8 @@ export const VIEW_STYLES = `
   .nx-chip { display: inline-block; padding: 1px 9px; border-radius: 99px; font-weight: 700; font-size: 12.5px; background: var(--c); color: var(--t); }
   .nx-off { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--warning-color, #f57c00); }
   .nx-off ha-icon { --mdc-icon-size: 15px; }
+  .nx-pre { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--secondary-text-color); }
+  .nx-pre ha-icon { --mdc-icon-size: 15px; }
   .nx-act { display: flex; flex: none; }
   .nx-act .ic { border: none; background: none; color: var(--secondary-text-color); cursor: pointer; border-radius: 50%; width: 34px; height: 34px;
     display: inline-grid; place-items: center; }
@@ -618,6 +644,10 @@ export const VIEW_STYLES = `
     background: color-mix(in srgb, var(--c) 16%, transparent); border: 1px dashed color-mix(in srgb, var(--c) 55%, transparent);
     pointer-events: none; }
   .gap span { display: block; padding: 3px 6px; font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--c) 60%, var(--primary-text-color)); }
+  .early { position: absolute; left: 2px; right: 2px; box-sizing: border-box; border-radius: 6px; z-index: 6; pointer-events: none;
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 45%, transparent) 0 5px, color-mix(in srgb, var(--c) 12%, transparent) 5px 10px);
+    border: 1px solid color-mix(in srgb, var(--c) 70%, transparent); }
+  .hs-track .early { top: 0; bottom: 0; right: auto; border-radius: 0; border-width: 0 1px; z-index: 2; }
   .ghost { position: absolute; left: 2px; right: 2px; z-index: 1; box-sizing: border-box; border-radius: 6px; padding: 3px 6px; overflow: hidden;
     border: 1px dashed color-mix(in srgb, var(--c) 70%, transparent); cursor: pointer;
     background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 20%, transparent) 0 5px, transparent 5px 10px);
@@ -639,7 +669,7 @@ export const VIEW_STYLES = `
     font-size: 10.5px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: var(--primary-text-color);
     border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent); background: color-mix(in srgb, var(--c) 18%, transparent); }
   .wk-xmore { font-size: 10.5px; color: var(--secondary-text-color); }
-  .wk-col.has-x .ev, .wk-col.has-x .ghost, .wk-col.has-x .gap { right: calc(26% + 2px); }
+  .wk-col.has-x .ev, .wk-col.has-x .ghost, .wk-col.has-x .gap, .wk-col.has-x .early { right: calc(26% + 2px); }
   .xev { position: absolute; width: 25%; min-height: 12px; box-sizing: border-box; border-radius: 6px; padding: 2px 4px; overflow: hidden; z-index: 1;
     font-size: 10.5px; line-height: 1.25; cursor: pointer; color: var(--primary-text-color); border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent);
     background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 30%, transparent) 0 6px, color-mix(in srgb, var(--c) 14%, transparent) 6px 12px); }

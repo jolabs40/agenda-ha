@@ -36,6 +36,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     platform.async_register_entity_service("advance", None, "async_advance")
     platform.async_register_entity_service("apply_event", {vol.Required("event"): cv.string}, "async_apply_event")
     platform.async_register_entity_service("resume", None, "async_resume")
+    # entity_id is the target of the action: the thermostat goes by another name
+    platform.async_register_entity_service(
+        "reset_learning", {vol.Optional("climate"): cv.entity_id}, "async_reset_learning"
+    )
 
 
 class AgendaCalendar(AgendaEntity, CalendarEntity):
@@ -95,3 +99,6 @@ class AgendaCalendar(AgendaEntity, CalendarEntity):
 
     async def async_resume(self) -> None:
         await self.agenda.async_resume()
+
+    async def async_reset_learning(self, climate: str | None = None) -> None:
+        self.agenda.reset_learning(climate)

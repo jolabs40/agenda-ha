@@ -28,6 +28,9 @@
       },
       "next_change": {
         "name": "Next change"
+      },
+      "heating_rate": {
+        "name": "Heating rate"
       }
     }
   },
@@ -105,6 +108,16 @@
     "resume": {
       "name": "Resume the schedule",
       "description": "Ends the override, and takes back the devices changed by hand."
+    },
+    "reset_learning": {
+      "name": "Reset the learning",
+      "description": "Forgets the heating and cooling speeds learned by the agenda.",
+      "fields": {
+        "climate": {
+          "name": "Thermostat",
+          "description": "Only this thermostat. Leave empty for all of them."
+        }
+      }
     }
   },
   "issues": {

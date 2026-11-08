@@ -26,6 +26,7 @@ const SUN_LIMIT = 720; // minutes of offset, as on the server
 const addMinutes = (hhmm, minutes) => wallTime(wm(`2000-01-01T${hhmm}`) + minutes);
 const minutesOf = (hhmm) => wm(`2000-01-01T${hhmm}`) - wm("2000-01-01T00:00");
 const kinds = await import(`./agenda-kinds.js${V}`);
+const { PREHEAT_STYLES, outdoorOptions, preheatSection, preheatSettings } = await import(`./agenda-preheat.js${V}`);
 
 const SWATCHES = [
   "#ef6c00",
@@ -1005,10 +1006,11 @@ function sharedFields(sec, { hass, T, shared, ws }) {
     country: shared?.configured || null,
     subdiv: shared?.subdiv || null,
     school: shared?.school_calendar || null,
+    outdoor: shared?.outdoor_sensor || null,
     allow: Boolean(shared?.allow_users),
     options: null,
   };
-  const values = () => JSON.stringify([hol.country, hol.subdiv, hol.school, hol.allow]);
+  const values = () => JSON.stringify([hol.country, hol.subdiv, hol.school, hol.outdoor, hol.allow]);
   const initial = values();
   const render = async () => {
     const lang = T._lang;
@@ -1050,9 +1052,12 @@ function sharedFields(sec, { hass, T, shared, ws }) {
           .join("")}
       </select></label>
       <p class="hint">${esc(T.school_calendar_hint)}</p>
+      <label class="fld"><span>${esc(T.outdoor_sensor)}</span><select class="inp" data-outdoor>${outdoorOptions(hass, hol.outdoor, T)}</select></label>
+      <p class="hint">${esc(T.outdoor_sensor_hint)}</p>
       <label class="tgl"><input type="checkbox" data-allow ${hol.allow ? "checked" : ""}><span></span>${esc(T.allow_users)}</label>`;
     sec.querySelector("[data-allow]").addEventListener("change", (x) => (hol.allow = x.target.checked));
     sec.querySelector("[data-school]").addEventListener("change", (x) => (hol.school = x.target.value || null));
+    sec.querySelector("[data-outdoor]").addEventListener("change", (x) => (hol.outdoor = x.target.value || null));
     sec.querySelector("[data-country]").addEventListener("change", (x) => {
       hol.country = x.target.value || null;
       hol.subdiv = null;
@@ -1069,6 +1074,7 @@ function sharedFields(sec, { hass, T, shared, ws }) {
         country: hol.country,
         subdiv: hol.subdiv,
         school_calendar: hol.school,
+        outdoor_sensor: hol.outdoor,
         allow_users: hol.allow,
       });
     },
@@ -1120,6 +1126,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
         )
         .join("")}</select>
       <p class="hint">${esc(T.manual_hold_hint)}</p></label>
+    <section data-sec="preheat"></section>
     <section data-sec="absence"></section>
     <details class="more"><summary>${esc(T.holidays_title)}</summary><div class="shared-f" data-sec="holidays"></div></details>`;
   const footer = `<button class="btn danger flat" data-del>${esc(T.delete)}</button>
@@ -1169,6 +1176,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
           sections.kind();
           sections.entities();
           sections.default();
+          sections.preheat();
           sections.absence();
         }),
       );
@@ -1219,6 +1227,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
           const id = c.dataset.cl;
           cfg.entities = c.checked ? [...cfg.entities, id] : cfg.entities.filter((x) => x !== id);
           sections.default();
+          sections.preheat();
         }),
       );
     },
@@ -1237,6 +1246,20 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
         set: (v) => (cfg.default_state = v),
         rerender: sections.default,
       });
+    },
+    preheat() {
+      const reset = async () => {
+        const buttons = [
+          { label: T.cancel, value: "" },
+          { label: T.preheat_reset, value: "yes", danger: true },
+        ];
+        if (!(await confirmDialog(host, { title: T.preheat_reset, text: T.preheat_reset_text, buttons }))) return;
+        await ws({ type: "agenda/preheat/reset", entry_id: agenda.entry_id });
+        const { agendas } = await ws({ type: "agenda/list" });
+        agenda.preheat = agendas.find((a) => a.entry_id === agenda.entry_id)?.preheat;
+        sections.preheat();
+      };
+      preheatSection(dlg.$('[data-sec="preheat"]'), { hass, T, agenda, cfg, reset });
     },
     absence() {
       const sec = dlg.$('[data-sec="absence"]');
@@ -1292,6 +1315,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
         presence_jitter: cfg.kind === "none" || cfg.follow_absence ? 0 : Number(cfg.presence_jitter) || 0,
         follow_absence: !!cfg.follow_absence,
         away_state: cfg.kind === "none" ? null : (cfg.away_state ?? null),
+        ...preheatSettings(cfg),
       },
     });
     await common.save();
@@ -1462,6 +1486,7 @@ export const DIALOG_STYLES = `
   .kind.on { border-color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 14%, transparent); font-weight: 600; }
   .kind.on ha-icon { color: var(--primary-color); }
   .hint b { font-weight: 600; color: var(--warning-color, #f57c00); }
+  ${PREHEAT_STYLES}
   .dlg-body > section:empty { display: none; }
   [hidden] { display: none !important; }
   @media (max-width: 600px) {

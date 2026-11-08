@@ -160,6 +160,7 @@ class Control:
         if new is None:
             return
         self._remember_mode(entity_id, new)
+        self.agenda.preheater.device_changed(entity_id, new)
         if devices.unavailable(new.state, new.attributes):
             return
         if entity_id in self.waiting and (old is None or devices.unavailable(old.state, old.attributes)):
@@ -227,6 +228,7 @@ class Control:
                 **self._event_data(entity_id, wanted),
                 "reason": reason,
                 "event": {"id": event["id"], "name": agenda.label(event)} if event else None,
+                **agenda.preheater.event_data(reason),
             }
             if assumed:
                 gate = _radio(self.hass)
@@ -243,6 +245,7 @@ class Control:
                 self.hass.bus.async_fire(EVENT_APPLIED, data, context=context)
                 await self._async_send(entity_id, calls, context)
         self.applied[entity_id] = copy.deepcopy(wanted)
+        agenda.preheater.applied(entity_id, wanted)
         if assumed:
             # no feedback: its state is only Home Assistant's guess, so there is nothing to check,
             # and sending again could move a single-button shutter the other way

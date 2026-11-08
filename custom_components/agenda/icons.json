@@ -1,4 +1,11 @@
 {
+  "entity": {
+    "sensor": {
+      "heating_rate": {
+        "default": "mdi:thermometer-chevron-up"
+      }
+    }
+  },
   "services": {
     "resync": {
       "service": "mdi:calendar-sync"
@@ -26,6 +33,9 @@
     },
     "resume": {
       "service": "mdi:calendar-refresh"
+    },
+    "reset_learning": {
+      "service": "mdi:restart"
     }
   }
 }

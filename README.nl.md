@@ -6,7 +6,7 @@ Planning met een kalender voor Home Assistant, naar het voorbeeld van de Agenda-
 Elke kamer of elk apparaat krijgt een eigen agenda, getoond als een week die je bewerkt door
 blokken te verslepen.
 
-[![Open je Home Assistant en toon deze repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
+[![Open je Home Assistant en toon deze repository in de Marktplaats.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
 [![Validate](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml/badge.svg)](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml)
 
 [English version](README.md) · [Version française](README.fr.md) · [Deutsche Version](README.de.md)
@@ -39,7 +39,8 @@ Assistant in het Nederlands staat.
   je wilt zien, zie wat elke agenda nu doet en wanneer hij wisselt, pauzeer hem of open zijn
   instellingen. Op een telefoon doen chips bovenaan hetzelfde. De knop Gebeurtenis toevoegen staat
   rechtsonder. Het paneel opent per browser op het laatst gekozen tabblad, en het tandwiel op de
-  regel Alle leidt naar de gedeelde instellingen.
+  regel Alle leidt naar de gedeelde instellingen. De rand van de kolom kun je slepen om hem breder
+  te maken, en ook dat onthoudt elke browser.
 - Dupliceren, in de instellingen van een agenda, maakt er een kopie van: dezelfde instellingen,
   dezelfde gebeurtenissen, zonder de apparaten, die je daarna kiest.
 - Andere kalenders van Home Assistant (schoolvakanties, een gezinskalender...) vink je in dezelfde
@@ -54,6 +55,9 @@ Assistant in het Nederlands staat.
 - Voorwaarden op entiteiten: een gebeurtenis neemt het alleen over zolang er bijvoorbeeld iemand
   thuis is, een raam dicht is of de buitentemperatuur onder 5 °C ligt; allemaal, of minstens één
   ervan.
+- Een instelwaarde of een waarde kan een entiteit volgen, bijvoorbeeld een `input_number` of een
+  template-sensor: verander die, en elke gebeurtenis die haar volgt, verandert mee. De waarde van de
+  gebeurtenis geldt zolang de entiteit er geen heeft.
 - De feestdagen van je land kunnen worden overgeslagen, of de enige dagen zijn.
 - Kalenders kunnen als voorwaarde dienen: dagen met een gebeurtenis erin overslaan (reizen,
   afwezigheden), alleen die dagen houden, of allebei bij dezelfde gebeurtenis. Bij meerdere
@@ -93,6 +97,8 @@ Assistant in het Nederlands staat.
 - Na een herstart worden de gekoppelde apparaten in de toestand gezet die de agenda verwacht (per
   agenda uit te schakelen), behalve de met de hand ingestelde.
 - Een dashboardkaart, `custom:agenda-card`, met een visuele editor.
+- Op tijd op temperatuur: een thermostaat start zo vroeg als nodig, zodat de kamer bij het begin
+  van de gebeurtenis op temperatuur is. Hoe snel de kamer opwarmt, wordt geleerd.
 - Temperaturen in °C of °F, zoals ingesteld in Home Assistant.
 - In het Engels, Frans, Duits en Nederlands.
 
@@ -116,17 +122,21 @@ naast de naam van de modus.
 
 ## Installatie
 
-Zoek Agenda in HACS (of gebruik de knop hierboven), download het en herstart Home Assistant.
+Zoek Agenda in Instellingen > Marktplaats (Marketplace) of gebruik de knop hierboven, en kies
+Installeren. De instelling van een eerste agenda volgt, zonder herstart.
 
-Verschijnt het nog niet, voeg het dan toe als aangepaste repository: open in HACS het menu, kies
-Aangepaste repositories en voeg `https://github.com/jolabs40/agenda-ha` toe met het type Integratie.
+Verschijnt het nog niet, kies dan Voeg toe via link en vul `https://github.com/jolabs40/agenda-ha` in
+(daarvoor wordt een verbinding met GitHub gevraagd).
 
-Zonder HACS `agenda.zip` van de [nieuwste versie](https://github.com/jolabs40/agenda-ha/releases/latest)
+Vóór Home Assistant 2026.11 was de Marktplaats de integratie HACS: zoek Agenda daar, download het en
+herstart Home Assistant.
+
+Zonder een van beide `agenda.zip` van de [nieuwste versie](https://github.com/jolabs40/agenda-ha/releases/latest)
 uitpakken in een map `custom_components/agenda` van je configuratie (of die map uit de repository
 kopiëren) en Home Assistant herstarten.
 
-Daarna de integratie Agenda toevoegen via Instellingen > Apparaten & diensten. Elk item is één
-agenda; meer maak je in het paneel met de knop Nieuwe agenda. Al het andere stel je in het
+Na HACS of een handmatige kopie de integratie Agenda toevoegen via Instellingen > Apparaten &
+diensten. Elk item is één agenda; meer maak je in het paneel met de knop Nieuwe agenda. Al het andere stel je in het
 Agenda-paneel in.
 
 Vereist Home Assistant 2024.7 of nieuwer. Het pakket `holidays` wordt automatisch geïnstalleerd.
@@ -170,6 +180,56 @@ Nu toepassen in de gebeurtenis-editor past de toestand van die gebeurtenis toe t
 haar volgende keer. Schema hervatten heft beide op en haalt de met de hand ingestelde apparaten
 terug.
 
+## Op tijd op temperatuur
+
+Zonder deze instelling krijgt een thermostaat zijn temperatuur bij het begin van de gebeurtenis, en
+begint de kamer dan pas op te warmen. Met Op tijd op temperatuur, in de instellingen van een
+thermostaatagenda, start hij vroeger zodat de kamer op tijd zover is. Dit geldt voor elke
+`climate`-entiteit (radiatorkraan, airco, warmtepomp, Versatile Thermostat), en een airco koelt op
+dezelfde manier vroeger. De instelling staat standaard uit.
+
+Bij elke stijging leert de agenda hoe snel de kamer gaat, in °C per uur, en hoe lang het apparaat
+nodig heeft om op gang te komen, per thermostaat, verwarmen en koelen apart. Ze heeft drie stijgingen
+nodig; tot dan rekent ze op 1,5 °C/u verwarmen, 2,5 °C/u koelen en 10 minuten aanloop. De voorsprong
+is die aanloop plus de tijd van de stijging, met 10 % marge, tot de Langste voorsprong (standaard
+3 uur, van 15 minuten tot 6 uur). Met meerdere thermostaten op een agenda beslist de traagste en
+starten ze allemaal samen.
+
+Een stijging telt niet als iemand het apparaat wijzigt, als het uitgaat of onbereikbaar wordt, als
+zijn temperatuur verandert, tijdens een afwezigheid, als ze langer duurt dan twee keer de langste
+voorsprong of als het verschil bij het begin hoogstens 0,5 °C is. Een open raam toont zich zo: het
+apparaat gaat uit of verandert van temperatuur, of de meting daalt.
+
+Op het berekende tijdstip geldt de hele toestand van de gebeurtenis: temperatuur, modus, ventilatie,
+zwenken. Een airco die uit staat, start dus in de juiste modus. Startacties blijven bij het begin.
+
+| Geval | Wat de agenda doet |
+|---|---|
+| Gebeurtenis met een voorinstelling, alleen een modus, of uit | niets vroeger, er is geen getal om te halen |
+| Terug naar een lagere temperatuur bij verwarmen, een hogere bij koelen | niets vroeger |
+| Agenda gepauzeerd, afwezigheid, afwijking, apparaat met de hand gewijzigd, voorwaarde onwaar | niets vroeger |
+| Een andere gebeurtenis is al begonnen | ze wijkt voor de vroege start |
+| Een andere gebeurtenis begint tussen de vroege start en het begin | ze houdt de leiding tot haar einde, de vroege start wacht |
+| De schatting daalt zodra de vroege start loopt | hij gaat door |
+| De gebeurtenis verdwijnt, haar voorwaarde wordt onwaar, de afwezigheid begint, de agenda wordt gepauzeerd | hij stopt en de agenda gaat terug naar de gewenste toestand |
+
+De meting is die van de thermostaat. De thermometer van een airco of een radiatorkraan wijkt vaak af
+van de temperatuur in de kamer: Temperatuursensor van de kamer vervangt die door een sensor, en zonder
+waarde van die sensor start niets vroeger. Gaat de meting in het uur na een stijging meestal 0,8 °C of
+meer voorbij de ingestelde temperatuur, dan melden de instellingen van de agenda dat: ze komt
+waarschijnlijk van dicht bij het apparaat, en de geleerde snelheden zijn te hoog. Buitentemperatuur,
+in de gedeelde instellingen, neemt een
+sensor of een `weather`-entiteit en corrigeert de geleerde snelheid met hoogstens 30 % naar het weer.
+
+De instellingen van de agenda tonen de geleerde snelheden en een knop om ze te vergeten, net als de
+actie `agenda.reset_learning` (op de kalender van de agenda, `climate` voor één thermostaat). De
+sensor Opwarmsnelheid geeft de snelheid in °C/u, met `cool_rate`, `dead_time`, `samples` en
+`last_sample`. De sensor Volgende wijziging heeft de attributen `preheat_start` en `preheat_minutes`
+zodra het tijdstip berekend is. De weergaven Week en Huis tekenen een gearceerde band vóór de
+gebeurtenis, en `agenda_state_applied` draagt de reden `preheat` met `preheat_minutes`,
+`preheat_start` en `target_time`. Het logboek zegt: "voorverwarmen door agenda Slaapkamer: 20 °C voor
+07:00 (begin 05:42)".
+
 ## Acties
 
 Acties werken zoals in automatiseringen, met drie extra variabelen:
@@ -206,6 +266,20 @@ standaardtoestand; haar acties aan het einde lopen toch. Een entiteit die onbesc
 houdt tien minuten haar laatste toestand, ook over een herstart: een sensor die even wegvalt,
 verandert niets.
 
+De week tekent een gebeurtenis waarvan de voorwaarden nu niet kloppen bleek en doorgestreept, zoals
+een dag die een agenda weghaalt: met één gebeurtenis per modus op hetzelfde moment verschijnt alleen
+die van de huidige modus. Komende dagen worden getekend alsof de voorwaarden hun huidige toestand
+houden.
+
+## Een waarde die een entiteit volgt
+
+De instelwaarde van een thermostaat, of de waarde van een Waarde-agenda, kan een entiteit volgen in
+plaats van een vast getal: een `input_number`, een `number` of een sensor, zoals een template-sensor
+die een waarde per modus geeft. Het apparaat krijgt de waarde van de entiteit bij het begin van de
+gebeurtenis en bij elke wijziging, afgerond op zijn stap en binnen zijn grenzen. Het getal dat in de
+gebeurtenis is ingesteld, geldt zolang de entiteit er geen heeft; een entiteit die onbeschikbaar
+wordt, houdt eerst tien minuten haar laatste waarde.
+
 ## Afwezigheidsmodus
 
 De knop bovenaan het paneel start hem, tot een datum of tot hij wordt gestopt; de acties
@@ -229,6 +303,7 @@ dag op hetzelfde moment aangaan.
 | `agenda.advance` | de kalender van een agenda | past de volgende wissel meteen toe (Naar de volgende) |
 | `agenda.apply_event` | de kalender van een agenda | `event` (naam): past deze gebeurtenis toe tot het einde van haar volgende keer |
 | `agenda.resume` | de kalender van een agenda | beëindigt de afwijking en haalt de met de hand ingestelde apparaten terug |
+| `agenda.reset_learning` | de kalender van een agenda | vergeet de geleerde snelheden, van al zijn thermostaten of van één (`climate`) |
 | `agenda.set_absence` | | `until` (optioneel): start de afwezigheidsmodus |
 | `agenda.end_absence` | | beëindigt hem |
 | `agenda.resync` | de kalender van een agenda | zet de apparaten in de toestand die de agenda nu wil, behalve de met de hand ingestelde |
@@ -262,7 +337,7 @@ Elke toestand die een apparaat krijgt, vuurt `agenda_state_applied` af; een appa
 een tweede poging nog niet toont, vuurt `agenda_state_failed` af en krijgt een probleem onder
 Reparaties. Hun gegevens: `agenda`, `entry_id`, `entity_id`, `state`, `label` (de toestand zoals
 het paneel hem toont), en bij `agenda_state_applied` de reden `reason` (`schedule`, `edit`,
-`resync`, `available`, `retry`...) en de gebeurtenis `event` (`id` en `name`) als een
+`resync`, `available`, `retry`, `preheat`...) en de gebeurtenis `event` (`id` en `name`) als een
 gebeurtenis hem bepaalde.
 
 ```yaml

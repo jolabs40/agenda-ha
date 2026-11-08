@@ -6,7 +6,7 @@ Zeitplanung per Kalender für Home Assistant, nach dem Vorbild des Agenda-Plugin
 Jeder Raum oder jedes Gerät bekommt eine eigene Agenda, als Woche dargestellt, die man durch
 Verschieben von Blöcken bearbeitet.
 
-[![Home Assistant öffnen und dieses Repository in HACS anzeigen.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
+[![Home Assistant öffnen und dieses Repository im Marketplace anzeigen.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=jolabs40&repository=agenda-ha&category=integration)
 [![Validate](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml/badge.svg)](https://github.com/jolabs40/agenda-ha/actions/workflows/validate.yml)
 
 [English version](README.md) · [Version française](README.fr.md) · [Nederlandse versie](README.nl.md)
@@ -39,7 +39,8 @@ auf Deutsch eingestellt ist.
   anzuzeigenden ankreuzen, sehen, was jede gerade tut und wann sie wechselt, sie pausieren oder ihre
   Einstellungen öffnen. Auf dem Telefon erledigen das Chips oben. Der Knopf Termin hinzufügen sitzt
   unten rechts. Das Panel öffnet sich je Browser mit dem zuletzt gewählten Reiter, und das Zahnrad
-  in der Zeile Alle führt zu den gemeinsamen Einstellungen.
+  in der Zeile Alle führt zu den gemeinsamen Einstellungen. Der Rand der Spalte lässt sich ziehen,
+  um sie zu verbreitern, und auch das merkt sich jeder Browser.
 - Duplizieren, in den Einstellungen einer Agenda, legt eine Kopie an: gleiche Einstellungen, gleiche
   Termine, ohne die Geräte, die danach gewählt werden.
 - Andere Kalender von Home Assistant (Schulferien, ein Familienkalender...) lassen sich in derselben
@@ -54,6 +55,9 @@ auf Deutsch eingestellt ist.
 - Bedingungen auf Entitäten: ein Termin übernimmt nur, solange zum Beispiel jemand zu Hause ist,
   ein Fenster geschlossen ist oder die Außentemperatur unter 5 °C liegt; alle, oder mindestens eine
   davon.
+- Ein Sollwert oder ein Wert kann einer Entität folgen, zum Beispiel einem `input_number` oder
+  einem Template-Sensor: ändert man sie, ändert sich jeder Termin mit, der ihr folgt. Der Wert des
+  Termins gilt, solange die Entität keinen hat.
 - Die Feiertage des eigenen Landes können übersprungen werden oder die einzigen Tage sein.
 - Kalender können als Bedingung dienen: Tage mit einem Termin darin überspringen (Reisen,
   Abwesenheiten), nur diese Tage behalten oder beides beim selben Termin. Bei mehreren Kalendern
@@ -92,6 +96,8 @@ auf Deutsch eingestellt ist.
 - Nach einem Neustart werden die verknüpften Geräte in den Zustand gebracht, den die Agenda
   vorsieht (pro Agenda abschaltbar), außer den von Hand eingestellten.
 - Eine Dashboard-Karte, `custom:agenda-card`, mit visuellem Editor.
+- Solltemperatur pünktlich erreichen: Ein Thermostat startet so früh wie nötig, damit der Raum zu
+  Beginn des Termins die Solltemperatur hat. Wie schnell der Raum warm wird, wird gelernt.
 - Temperaturen in °C oder °F, wie in Home Assistant eingestellt.
 - Auf Englisch, Französisch, Deutsch und Niederländisch.
 
@@ -115,19 +121,21 @@ erscheinen sie neben den Namen der Modi.
 
 ## Installation
 
-In HACS nach Agenda suchen (oder den Knopf oben verwenden), herunterladen und Home Assistant neu
-starten.
+Unter Einstellungen > Marketplace nach Agenda suchen (oder den Knopf oben verwenden) und
+Installieren wählen. Die Einrichtung einer ersten Agenda folgt, ohne Neustart.
 
-Taucht es noch nicht auf, als benutzerdefiniertes Repository hinzufügen: in HACS das Menü öffnen,
-Benutzerdefinierte Repositories wählen und `https://github.com/jolabs40/agenda-ha` mit dem Typ
-Integration hinzufügen.
+Taucht es noch nicht auf, Über Link hinzufügen wählen und `https://github.com/jolabs40/agenda-ha`
+eingeben (dafür wird eine Verbindung mit GitHub verlangt).
 
-Ohne HACS `agenda.zip` aus der [neuesten Version](https://github.com/jolabs40/agenda-ha/releases/latest)
+Vor Home Assistant 2026.11 war der Marketplace die Integration HACS: dort nach Agenda suchen,
+herunterladen und Home Assistant neu starten.
+
+Ohne beides `agenda.zip` aus der [neuesten Version](https://github.com/jolabs40/agenda-ha/releases/latest)
 in einen Ordner `custom_components/agenda` der Konfiguration entpacken (oder diesen Ordner aus dem
 Repository kopieren) und Home Assistant neu starten.
 
-Danach die Integration Agenda unter Einstellungen > Geräte & Dienste hinzufügen. Jeder Eintrag ist
-eine Agenda; weitere lassen sich im Panel mit dem Knopf Neue Agenda anlegen. Alles andere wird im
+Nach HACS oder einer Kopie von Hand die Integration Agenda unter Einstellungen > Geräte & Dienste
+hinzufügen. Jeder Eintrag ist eine Agenda; weitere lassen sich im Panel mit dem Knopf Neue Agenda anlegen. Alles andere wird im
 Agenda-Panel eingestellt.
 
 Erfordert Home Assistant 2024.7 oder neuer. Das Paket `holidays` wird automatisch installiert. Das
@@ -169,6 +177,57 @@ den danach), Jetzt anwenden im Termineditor wendet den Zustand dieses Termins bi
 nächsten Vorkommens an. Zeitplan fortsetzen hebt beide auf und holt die von Hand eingestellten
 Geräte zurück.
 
+## Solltemperatur pünktlich erreichen
+
+Ohne diese Einstellung bekommt ein Thermostat seine Solltemperatur zu Beginn des Termins, und der
+Raum wird erst dann warm. Mit Solltemperatur pünktlich erreichen, in den Einstellungen einer
+Thermostat-Agenda, startet es früher, damit der Raum rechtzeitig so weit ist. Das gilt für jede
+`climate`-Entität (Heizkörperthermostat, Klimaanlage, Wärmepumpe, Versatile Thermostat), und eine
+Klimaanlage kühlt auf dieselbe Weise früher. Die Einstellung ist standardmäßig aus.
+
+Bei jedem Anstieg lernt die Agenda, wie schnell der Raum ist, in °C pro Stunde, und wie lange das
+Gerät zum Anlaufen braucht, für jedes Thermostat, Heizen und Kühlen getrennt. Sie braucht drei
+Anstiege; bis dahin rechnet sie mit 1,5 °C/h beim Heizen, 2,5 °C/h beim Kühlen und 10 Minuten
+Anlauf. Der Vorlauf ist dieser Anlauf plus die Zeit des Anstiegs, mit 10 % Reserve, bis zum Längsten
+Vorlauf (standardmäßig 3 Stunden, von 15 Minuten bis 6 Stunden). Mit mehreren Thermostaten in einer
+Agenda entscheidet das langsamste, und alle starten gemeinsam.
+
+Ein Anstieg zählt nicht, wenn jemand das Gerät ändert, wenn es ausgeht oder nicht erreichbar ist,
+wenn sich seine Solltemperatur ändert, während einer Abwesenheit, wenn er länger als das Doppelte des
+längsten Vorlaufs dauert oder wenn der Abstand zu Beginn höchstens 0,5 °C beträgt. Ein offenes
+Fenster zeigt sich so: Das Gerät geht aus oder ändert seine Solltemperatur, oder die Messung fällt.
+
+Zur berechneten Zeit gilt der ganze Zustand des Termins: Solltemperatur, Modus, Lüfter, Schwenken.
+Eine ausgeschaltete Klimaanlage startet also im richtigen Modus. Startaktionen bleiben beim Beginn.
+
+| Fall | Was die Agenda tut |
+|---|---|
+| Termin mit Voreinstellung, nur Modus oder Aus | nichts früher, es fehlt eine Zahl als Ziel |
+| Rückweg zu einer niedrigeren Solltemperatur beim Heizen, einer höheren beim Kühlen | nichts früher |
+| Agenda pausiert, Abwesenheit, Abweichung, Gerät von Hand geändert, Bedingung falsch | nichts früher |
+| Ein anderer Termin hat schon begonnen | er weicht dem frühen Start |
+| Ein anderer Termin beginnt zwischen dem frühen Start und dem Beginn | er behält die Führung bis zu seinem Ende, der frühe Start wartet |
+| Die Schätzung sinkt nach dem frühen Start | er läuft weiter |
+| Der Termin verschwindet, seine Bedingung wird falsch, die Abwesenheit beginnt, die Agenda wird pausiert | er endet, und die Agenda kehrt zum gewünschten Zustand zurück |
+
+Gemessen wird am Thermostat. Das Thermometer einer Klimaanlage oder eines Heizkörperthermostats
+weicht oft von der Raumtemperatur ab: Temperatursensor des Raums ersetzt es durch einen Sensor, und
+ohne Wert dieses Sensors startet nichts früher. Überschreitet die Messung in der Stunde nach einem
+Anstieg die Solltemperatur meist um 0,8 °C oder mehr, weisen die Einstellungen der Agenda darauf hin:
+Sie stammt wohl aus der Nähe des Geräts, und die gelernten Geschwindigkeiten sind zu hoch.
+Außentemperatur, in den gemeinsamen Einstellungen,
+nimmt einen Sensor oder eine `weather`-Entität und korrigiert die gelernte Geschwindigkeit je nach
+Wetter um höchstens 30 %.
+
+Die Einstellungen der Agenda zeigen die gelernten Geschwindigkeiten und eine Schaltfläche, um sie zu
+vergessen, wie die Aktion `agenda.reset_learning` (auf dem Kalender der Agenda, `climate` für nur ein
+Thermostat). Der Sensor Aufheizgeschwindigkeit gibt die Geschwindigkeit in °C/h an, mit `cool_rate`,
+`dead_time`, `samples` und `last_sample`. Der Sensor Nächste Änderung hat die Attribute
+`preheat_start` und `preheat_minutes`, sobald die Zeit berechnet ist. Die Ansichten Woche und Haus
+zeichnen ein schraffiertes Band vor dem Termin, und `agenda_state_applied` trägt den Grund `preheat`
+mit `preheat_minutes`, `preheat_start` und `target_time`. Das Logbuch sagt: "Vorheizen durch Agenda
+Schlafzimmer: 20 °C für 07:00 (Beginn 05:42)".
+
 ## Aktionen
 
 Aktionen funktionieren wie in Automatisierungen, mit drei zusätzlichen Variablen:
@@ -204,6 +263,20 @@ dem nächsten Termin oder dem Standardzustand; seine Aktionen am Ende laufen tro
 die nicht mehr verfügbar ist, behält ihren letzten Zustand zehn Minuten lang, auch über einen
 Neustart: ein Sensor, der kurz ausfällt, ändert nichts.
 
+Die Woche zeichnet einen Termin, dessen Bedingungen gerade nicht erfüllt sind, blass und
+durchgestrichen, wie einen Tag, den ein Kalender entfernt: mit einem Termin pro Modus zur selben
+Zeit erscheint nur der des aktuellen Modus. Kommende Tage werden gezeichnet, als behielten die
+Bedingungen ihren jetzigen Zustand.
+
+## Ein Wert, der einer Entität folgt
+
+Der Sollwert eines Thermostats oder der Wert eines Wert-Agendas kann statt einer festen Zahl einer
+Entität folgen: einem `input_number`, einem `number` oder einem Sensor, etwa einem Template-Sensor,
+der einen Wert pro Modus liefert. Das Gerät erhält den Wert der Entität zu Beginn des Termins und
+bei jeder Änderung, auf seine Schrittweite gerundet und in seinen Grenzen. Die im Termin
+eingestellte Zahl gilt, solange die Entität keinen Wert hat; eine Entität, die nicht mehr
+verfügbar ist, behält zuerst zehn Minuten lang ihren letzten Wert.
+
 ## Abwesenheitsmodus
 
 Der Knopf oben im Panel startet ihn, bis zu einem Datum oder bis er beendet wird; die Aktionen
@@ -227,6 +300,7 @@ Tag zur selben Zeit angehen.
 | `agenda.advance` | der Kalender einer Agenda | wendet den nächsten Wechsel sofort an (Zum Nächsten) |
 | `agenda.apply_event` | der Kalender einer Agenda | `event` (Name): wendet diesen Termin bis zum Ende seines nächsten Vorkommens an |
 | `agenda.resume` | der Kalender einer Agenda | beendet die Abweichung und holt die von Hand eingestellten Geräte zurück |
+| `agenda.reset_learning` | der Kalender einer Agenda | vergisst die gelernten Geschwindigkeiten, aller Thermostate oder eines einzelnen (`climate`) |
 | `agenda.set_absence` | | `until` (optional): startet den Abwesenheitsmodus |
 | `agenda.end_absence` | | beendet ihn |
 | `agenda.resync` | der Kalender einer Agenda | bringt die Geräte in den Zustand, den die Agenda jetzt vorsieht, außer den von Hand eingestellten |
@@ -260,7 +334,7 @@ Jeder Zustand, den ein Gerät bekommt, löst `agenda_state_applied` aus; ein Ger
 einem zweiten Versuch noch nicht anzeigt, löst `agenda_state_failed` aus und bekommt ein Problem
 unter Reparaturen. Ihre Daten: `agenda`, `entry_id`, `entity_id`, `state`, `label` (der Zustand,
 wie ihn das Panel zeigt), und bei `agenda_state_applied` der Grund `reason` (`schedule`, `edit`,
-`resync`, `available`, `retry`...) sowie der Termin `event` (`id` und `name`), wenn ein Termin ihn
+`resync`, `available`, `retry`, `preheat`...) sowie der Termin `event` (`id` und `name`), wenn ein Termin ihn
 bestimmt hat.
 
 ```yaml
