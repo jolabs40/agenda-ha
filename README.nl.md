@@ -31,6 +31,9 @@ Assistant in het Nederlands staat.
     Een dag kun je naar andere dagen van de week kopiëren.
     Een blok noemt de kalenders waarvan zijn gebeurtenis afhangt, en omlijnt degene die hem die dag
     laat lopen; dagen die een kalender uit een reeks haalt, verschijnen gearceerd.
+    Een uitgeschakelde gebeurtenis (Gebeurtenis actief, in haar editor) verschijnt bleek en
+    doorgestreept, om haar te openen en weer in te schakelen; het blok van een gebeurtenis met
+    acties draagt een klein teken.
   - Maand: de gebeurtenissen van elke dag, met feestdagen en schoolvakanties.
   - Huis: alle agenda's over één dag, met wat elk apparaat nu doet en, bij thermostaten, de
     gemeten temperatuur onder de instelwaarde.
@@ -85,15 +88,16 @@ Assistant in het Nederlands staat.
   instellen, of alleen een modus (alleen ventilator, ontvochtigen).
 - Een afwezigheidsmodus voor het hele huis: de agenda's die hem volgen, houden hun
   afwezigheidstoestand tot een datum, of tot hij wordt gestopt. De andere (lampen) kunnen intussen
-  aanwezigheid nabootsen.
+  aanwezigheid nabootsen. Een schakelaar toont hem aan automatiseringen, en de dashboardkaart
+  heeft zijn knop.
 - Per agenda: een `calendar`-entiteit (Kalender-paneel, kalendertriggers), een schakelaar Actief die
   de agenda pauzeert, de sensoren Nu en Volgende wijziging.
 - Acties voor automatiseringen en spraakassistenten: de volgende gebeurtenis overslaan, datums
   toevoegen of verwijderen, van het schema afwijken, de afwezigheidsmodus starten of beëindigen.
 - Het logboek noemt de agenda die een apparaat heeft gewijzigd, en twee gebeurtenissen laten
   automatiseringen reageren.
-- Gebruikers zonder beheerdersrechten kunnen gebeurtenissen mogen bewerken; start- en eindacties
-  blijven bij de beheerders.
+- Gebruikers zonder beheerdersrechten kunnen gebeurtenissen en de afwezigheid mogen bewerken;
+  start- en eindacties blijven bij de beheerders.
 - Na een herstart worden de gekoppelde apparaten in de toestand gezet die de agenda verwacht (per
   agenda uit te schakelen), behalve de met de hand ingestelde.
 - Een dashboardkaart, `custom:agenda-card`, met een visuele editor.
@@ -249,6 +253,8 @@ Acties werken zoals in automatiseringen, met drie extra variabelen:
 Alleen beheerders stellen acties in. Gebruikers die gebeurtenissen mogen bewerken, zien ze niet, en
 hun wijzigingen houden de bestaande acties.
 
+In de week draagt het blok van een gebeurtenis met acties rechtsonder een klein teken.
+
 ## Zonsopgang, zonsondergang en voorwaarden
 
 De tijden van de zon berekent Home Assistant dag voor dag voor de locatie die is ingesteld onder
@@ -282,11 +288,19 @@ wordt, houdt eerst tien minuten haar laatste waarde.
 
 ## Afwezigheidsmodus
 
-De knop bovenaan het paneel start hem, tot een datum of tot hij wordt gestopt; de acties
+De knop bovenaan het paneel of op de dashboardkaart start hem, tot een datum of tot hij wordt
+gestopt; de acties
 `agenda.set_absence` en `agenda.end_absence` doen hetzelfde vanuit een automatisering. Intussen
 houdt elke agenda die hem volgt (een optie in haar instellingen) haar afwezigheidstoestand, of
 anders haar standaardtoestand, en voert ze geen actie uit. Aan het einde keert elke agenda terug
 naar haar programma.
+
+De schakelaar `switch.agenda_absence` staat aan tijdens een afwezigheid, met het einde in het
+attribuut `until` (leeg als ze duurt tot ze wordt gestopt): een automatisering kan erop reageren,
+en hem aanzetten start een afwezigheid tot hij wordt uitgezet. Net als in het paneel zijn de
+schakelaar en beide acties voorbehouden aan beheerders, tenzij de gedeelde instellingen
+gebruikers toestaan gebeurtenissen en de afwezigheid te bewerken; automatiseringen vallen daar
+niet onder.
 
 Een agenda die hem niet volgt, kan in plaats daarvan aanwezigheid nabootsen
 (Aanwezigheidssimulatie, in haar instellingen): tijdens een afwezigheid verschuiven haar begin- en
@@ -399,6 +413,9 @@ agenda: Slaapkamer
 ```
 
 De kaart heeft een visuele editor. Een klik erop opent het paneel.
+
+Elke weergave heeft een knop om de afwezigheidsmodus te starten of te beëindigen, voor de
+gebruikers die dat mogen, en tijdens een afwezigheid een melding; `absence: false` laat beide weg.
 
 ## Steun
 

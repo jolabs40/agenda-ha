@@ -26,6 +26,8 @@ agenda goes back to its default state.
     On a touch screen, a long press picks a block up. A day can be copied to other days of the week.
     A block names the calendars its event depends on, and outlines the one that makes it run that
     day; the days a calendar takes out of a series show hatched.
+    An event turned off (Event active, in its editor) shows faded and struck through, to be opened
+    and turned back on; the block of an event with actions carries a small mark.
   - Month: each day's events, with public and school holidays.
   - House: every agenda over one day, with what each device is doing now and, for thermostats, the
     measured temperature drawn under the setpoint.
@@ -75,12 +77,14 @@ agenda goes back to its default state.
   alone (fan only, dry).
 - An absence mode for the whole house: the agendas that follow it keep their away state until a
   date, or until it is stopped. The others (lights) can simulate presence meanwhile.
+  A switch shows it to automations, and the dashboard card has its button.
 - Per agenda: a `calendar` entity (Calendar panel, calendar triggers), an Active switch that
   pauses the agenda, Now and Next change sensors.
 - Actions for automations and voice assistants: skip the next occurrence, add or remove dates,
   override the schedule, start or end the absence mode.
 - The logbook names the agenda that changed a device, and two events let automations react.
-- Non-admin users can be allowed to edit events; start and end actions stay with administrators.
+- Non-admin users can be allowed to edit events and the absence; start and end actions stay with
+  administrators.
 - After a restart the linked devices are put back in the state the agenda expects (can be turned
   off per agenda), except those set by hand.
 - A dashboard card, `custom:agenda-card`, with a visual editor.
@@ -231,6 +235,8 @@ Actions work as in automations, with three extra variables:
 Only administrators set actions. Users allowed to edit events do not see them, and their changes
 keep the actions already in place.
 
+In the week, the block of an event with actions carries a small mark at its bottom right.
+
 ## Sunrise, sunset and conditions
 
 Sun times are computed by Home Assistant, day by day, for the location set in Settings > System >
@@ -259,10 +265,17 @@ has none; an entity that becomes unavailable first keeps its last value for ten 
 
 ## Absence mode
 
-The button at the top of the panel starts it, until a date or until it is stopped; the actions
-`agenda.set_absence` and `agenda.end_absence` do the same from an automation. Meanwhile each agenda
+The button at the top of the panel, or of the dashboard card, starts it, until a date or until it
+is stopped; the actions `agenda.set_absence` and `agenda.end_absence` do the same from an
+automation. Meanwhile each agenda
 that follows it (an option in its settings) keeps its away state, or its default state, and runs
 no action. At the end every agenda goes back to its schedule.
+
+The switch `switch.agenda_absence` is on during an absence, with its end in the `until` attribute
+(empty when it lasts until stopped): an automation can react to it, and turning it on starts an
+absence until it is turned off. As in the panel, the switch and both actions are kept to
+administrators, unless the shared settings let users edit events and the absence; automations
+are not concerned.
 
 An agenda that does not follow it can simulate presence instead (Presence simulation, in its
 settings): during an absence its starts and ends move at random by up to the chosen number of
@@ -374,6 +387,9 @@ agenda: Bedroom
 ```
 
 The card has a visual editor. Clicking it opens the panel.
+
+Every view has a button to start or end the absence mode, for the users allowed to, and a banner
+during an absence; `absence: false` leaves both out.
 
 ## Support
 

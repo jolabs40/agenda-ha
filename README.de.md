@@ -31,6 +31,9 @@ auf Deutsch eingestellt ist.
     Block an. Ein Tag lässt sich auf andere Tage der Woche kopieren.
     Ein Block nennt die Kalender, von denen sein Termin abhängt, und umrandet den, der ihn an diesem
     Tag auslöst; Tage, die ein Kalender aus einer Serie nimmt, erscheinen schraffiert.
+    Ein ausgeschalteter Termin (Termin aktiv, in seinem Editor) erscheint blass und
+    durchgestrichen, um ihn zu öffnen und wieder einzuschalten; der Block eines Termins mit
+    Aktionen trägt ein kleines Zeichen.
   - Monat: die Termine jedes Tages, mit Feiertagen und Schulferien.
   - Haus: alle Agenden über einen Tag, mit dem, was jedes Gerät gerade tut, und bei Thermostaten
     der gemessenen Temperatur unter dem Sollwert.
@@ -84,15 +87,16 @@ auf Deutsch eingestellt ist.
   einstellen, oder nur einen Modus (nur Lüfter, Entfeuchten).
 - Ein Abwesenheitsmodus für das ganze Haus: die Agenden, die ihm folgen, behalten ihren
   Abwesenheitszustand bis zu einem Datum oder bis er beendet wird. Die anderen (Lampen) können
-  derweil Anwesenheit simulieren.
+  derweil Anwesenheit simulieren. Ein Schalter zeigt ihn den Automatisierungen, und die
+  Dashboard-Karte hat seinen Knopf.
 - Pro Agenda: eine `calendar`-Entität (Kalender-Panel, Kalender-Auslöser), ein Schalter Aktiv, der
   die Agenda pausiert, die Sensoren Jetzt und Nächste Änderung.
 - Aktionen für Automatisierungen und Sprachassistenten: den nächsten Termin überspringen, Daten
   hinzufügen oder entfernen, vom Zeitplan abweichen, den Abwesenheitsmodus starten oder beenden.
 - Das Logbuch nennt die Agenda, die ein Gerät geändert hat, und zwei Ereignisse lassen
   Automatisierungen reagieren.
-- Benutzer ohne Administratorrechte können Termine bearbeiten dürfen; Start- und Endaktionen
-  bleiben den Administratoren vorbehalten.
+- Benutzer ohne Administratorrechte können Termine und die Abwesenheit bearbeiten dürfen; Start-
+  und Endaktionen bleiben den Administratoren vorbehalten.
 - Nach einem Neustart werden die verknüpften Geräte in den Zustand gebracht, den die Agenda
   vorsieht (pro Agenda abschaltbar), außer den von Hand eingestellten.
 - Eine Dashboard-Karte, `custom:agenda-card`, mit visuellem Editor.
@@ -247,6 +251,8 @@ Aktionen funktionieren wie in Automatisierungen, mit drei zusätzlichen Variable
 Nur Administratoren legen Aktionen fest. Benutzer, die Termine bearbeiten dürfen, sehen sie nicht,
 und ihre Änderungen behalten die vorhandenen Aktionen.
 
+In der Woche trägt der Block eines Termins mit Aktionen unten rechts ein kleines Zeichen.
+
 ## Sonnenaufgang, Sonnenuntergang und Bedingungen
 
 Die Sonnenzeiten berechnet Home Assistant Tag für Tag für den Standort, der unter Einstellungen >
@@ -279,11 +285,19 @@ verfügbar ist, behält zuerst zehn Minuten lang ihren letzten Wert.
 
 ## Abwesenheitsmodus
 
-Der Knopf oben im Panel startet ihn, bis zu einem Datum oder bis er beendet wird; die Aktionen
+Der Knopf oben im Panel oder auf der Dashboard-Karte startet ihn, bis zu einem Datum oder bis er
+beendet wird; die Aktionen
 `agenda.set_absence` und `agenda.end_absence` tun dasselbe aus einer Automatisierung. In dieser Zeit
 behält jede Agenda, die ihm folgt (eine Option in ihren Einstellungen), ihren Abwesenheitszustand
 oder sonst ihren Standardzustand und führt keine Aktion aus. Am Ende kehrt jede Agenda zu ihrem
 Programm zurück.
+
+Der Schalter `switch.agenda_absence` ist während einer Abwesenheit an, mit ihrem Ende im Attribut
+`until` (leer, wenn sie bis zum Beenden dauert): eine Automatisierung kann darauf reagieren, und
+ihn einzuschalten startet eine Abwesenheit, bis er ausgeschaltet wird. Wie im Panel sind der
+Schalter und beide Aktionen den Administratoren vorbehalten, außer die gemeinsamen Einstellungen
+erlauben Benutzern, Termine und die Abwesenheit zu bearbeiten; Automatisierungen betrifft das
+nicht.
 
 Eine Agenda, die ihm nicht folgt, kann stattdessen Anwesenheit simulieren (Anwesenheitssimulation,
 in ihren Einstellungen): während einer Abwesenheit verschieben sich ihre Beginn- und Endzeiten
@@ -395,6 +409,10 @@ agenda: Schlafzimmer
 ```
 
 Die Karte hat einen visuellen Editor. Ein Klick darauf öffnet das Panel.
+
+Jede Ansicht hat einen Knopf, um den Abwesenheitsmodus zu starten oder zu beenden, für die
+Benutzer, die es dürfen, und während einer Abwesenheit einen Hinweis; `absence: false` lässt
+beides weg.
 
 ## Unterstützung
 

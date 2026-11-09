@@ -206,11 +206,12 @@ export function followed(hass, st) {
   return Number.isFinite(value) ? { ...st, [field]: value } : st;
 }
 
-/** Short label of a state, e.g. "20.5°", "Eco 18°", "On 60 %"; "Comfort · 20.5°" when it follows an entity. */
+/** Short label of a state, e.g. "20.5°", "Eco 18°", "On 60 %"; "20.5° · Comfort" when it follows an entity,
+ * the value first since a narrow block cuts the end. */
 export function stateLabel(hass, agenda, st, T, withTemp = true) {
   if (!st) return "";
   const text = plainLabel(hass, agenda, followed(hass, st), T, withTemp);
-  return st.source && SOURCE_FIELDS[st.type] && withTemp ? `${friendlyName(hass, st.source)} · ${text}` : text;
+  return st.source && SOURCE_FIELDS[st.type] && withTemp ? `${text} · ${friendlyName(hass, st.source)}` : text;
 }
 
 function plainLabel(hass, agenda, st, T, withTemp) {

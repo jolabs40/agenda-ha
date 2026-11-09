@@ -1,17 +1,19 @@
 // Dashboard card: today for every agenda, one agenda's week, or the next changes.
-// Clicking it opens the panel; the next changes view also skips ahead and resumes.
+// Clicking it opens the panel; the next changes view also skips ahead and resumes,
+// and every view starts and ends the absence mode.
 //
 //   type: custom:agenda-card
 //   view: house            # or week, or next
 //   agenda: Bedroom        # week view: name of the agenda
 //   agendas: [Bedroom]     # house and next views: only these agendas (optional)
 //   title: Heating         # optional
+//   absence: false         # no absence button nor banner (optional)
 
 const V = new URL(import.meta.url).search;
 const lib = await import(`./agenda-lib.js${V}`);
 const views = await import(`./agenda-views.js${V}`);
 
-const { DAY, dayOf, esc, loadHaComponents, mondayOf, nowWall, wallDate, texts } = lib;
+const { DAY, dayOf, esc, fmtDay, loadHaComponents, mondayOf, nowWall, wall, wallDate, wm, texts } = lib;
 
 class AgendaCard extends HTMLElement {
   static getStubConfig() {
@@ -24,7 +26,11 @@ class AgendaCard extends HTMLElement {
 
   setConfig(config) {
     this._config = { view: "house", ...config };
-    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+      this.shadowRoot.innerHTML = `<style>${views.VIEW_STYLES}${CARD_STYLES}</style><ha-card></ha-card>`;
+      this.shadowRoot.querySelector("ha-card").addEventListener("click", (e) => this._onClick(e));
+    }
     this._render();
   }
 
@@ -133,6 +139,21 @@ class AgendaCard extends HTMLElement {
     this._render();
   }
 
+  /** Events and the absence, as in the panel: admins, or everyone when the shared settings allow it. */
+  _canEdit() {
+    return Boolean(this._hass?.user?.is_admin || this._data?.shared?.allow_users);
+  }
+
+  _awayHtml(T) {
+    const absence = this._data?.shared?.absence;
+    if (!absence || this._config.absence === false) return "";
+    const until = absence.until
+      ? `${fmtDay(wm(absence.until), T._lang, { weekday: "short", day: "numeric", month: "short" })} ${wall(wm(absence.until)).slice(11)}`
+      : null;
+    return `<div class="away"><ha-icon icon="mdi:home-export-outline"></ha-icon><span>${esc(T.absence_on(until))}</span>
+      ${this._canEdit() ? `<button data-absence-stop>${esc(T.absence_stop)}</button>` : ""}</div>`;
+  }
+
   _render() {
     if (!this.shadowRoot || !this._config) return;
     const T = this.T || texts(this._hass);
@@ -155,7 +176,7 @@ class AgendaCard extends HTMLElement {
         editable: false,
       };
       // the same rights as editing events in the panel
-      const steer = Boolean(this._hass.user?.is_admin || this._data.shared?.allow_users);
+      const steer = this._canEdit();
       if (this._config.view === "next") body = views.renderNext({ ...ctx, steer });
       else if (this._config.view === "week")
         body = `<div class="scroll">${views.renderWeek({ ...ctx, firstDay: mondayOf(now), days: 7, hourH: this._config.hour_height || 20 })}</div>`;
@@ -164,27 +185,80 @@ class AgendaCard extends HTMLElement {
     const view = this._config.view;
     const title =
       this._config.title ?? (view === "week" ? this._agendas()[0]?.name : view === "next" ? T.next_changes : T.title);
-    this.shadowRoot.innerHTML = `<style>${views.VIEW_STYLES}${CARD_STYLES}</style>
-      <ha-card>${title ? `<div class="head"><ha-icon icon="mdi:calendar-month"></ha-icon>${esc(title)}</div>` : ""}
-        <div class="body ${this._config.view}">${body}</div></ha-card>`;
+    const away = Boolean(this._data?.shared?.absence);
+    const awayButton =
+      this._data && this._config.absence !== false && this._canEdit()
+        ? `<button class="ic ${away ? "on" : ""}" data-absence title="${esc(T.absence_title)}" aria-label="${esc(T.absence_title)}">
+            <ha-icon icon="mdi:home-export-outline"></ha-icon></button>`
+        : "";
+    const head =
+      title || awayButton
+        ? `<div class="head">${title ? `<ha-icon icon="mdi:calendar-month"></ha-icon><span>${esc(title)}</span>` : ""}${awayButton}</div>`
+        : "";
+    this.shadowRoot.querySelector("ha-card").innerHTML =
+      `${head}${this._data ? this._awayHtml(T) : ""}<div class="body ${this._config.view}">${body}</div>`;
     requestAnimationFrame(() => views.fitLabels(this.shadowRoot));
-    this.shadowRoot.querySelector("ha-card").addEventListener("click", (e) => {
-      const button = e.target.closest("[data-advance], [data-resume]");
-      if (button) {
-        const action = button.dataset.advance ? "next" : "resume";
-        const id = button.dataset.advance || button.dataset.resume;
-        button.disabled = true;
-        this._hass
-          .callWS({ type: "agenda/override", entry_id: id, action })
-          .catch((err) => (this._error = err.message || String(err)))
-          .finally(() => this._load());
-        return;
-      }
-      history.pushState(null, "", "/agenda");
-      window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
-    });
+  }
+
+  async _onClick(e) {
+    const button = e.target.closest("[data-advance], [data-resume]");
+    if (button) {
+      const action = button.dataset.advance ? "next" : "resume";
+      const id = button.dataset.advance || button.dataset.resume;
+      button.disabled = true;
+      this._hass
+        .callWS({ type: "agenda/override", entry_id: id, action })
+        .catch((err) => (this._error = err.message || String(err)))
+        .finally(() => this._load());
+      return;
+    }
+    if (e.target.closest("[data-absence-stop]")) {
+      await this._hass
+        .callWS({ type: "agenda/absence/set", active: false })
+        .catch((err) => (this._error = err.message || String(err)));
+      this._load();
+      return;
+    }
+    if (e.target.closest("[data-absence]")) {
+      if (await this._absenceDialog()) this._load();
+      return;
+    }
+    // the banner is not a way into the panel
+    if (e.target.closest(".away")) return;
+    history.pushState(null, "", "/agenda");
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+  }
+
+  /** The panel's absence window, on the page itself: a dashboard can clip what a card holds. */
+  async _absenceDialog() {
+    const dialogs = await import(`./agenda-dialogs.js${V}`);
+    const holder = document.createElement("div");
+    const root = holder.attachShadow({ mode: "open" });
+    root.innerHTML = `<style>${DIALOG_HOST_STYLES}${dialogs.DIALOG_STYLES}</style><div></div>`;
+    document.body.appendChild(holder);
+    try {
+      return await dialogs.absenceDialog(root.lastElementChild, {
+        T: this.T,
+        absence: this._data.shared.absence,
+        now: nowWall(this._data.time_zone),
+        ws: (m) => this._hass.callWS(m),
+      });
+    } finally {
+      holder.remove();
+    }
   }
 }
+
+const DIALOG_HOST_STYLES = `
+  :host {
+    color: var(--primary-text-color);
+    font-family: var(--ha-font-family-body, var(--paper-font-body1_-_font-family, Roboto, sans-serif));
+    --agenda-hover: color-mix(in srgb, var(--primary-text-color) 7%, transparent);
+    --agenda-input: color-mix(in srgb, var(--primary-text-color) 3%, var(--card-background-color));
+  }
+  [hidden] { display: none !important; }
+  ha-icon { --mdc-icon-size: 20px; }
+`;
 
 const CARD_STYLES = `
   :host {
@@ -198,7 +272,21 @@ const CARD_STYLES = `
   }
   ha-card { cursor: pointer; overflow: hidden; }
   .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px; font-size: 18px; font-weight: 500; }
-  .head ha-icon { color: var(--primary-color); --mdc-icon-size: 22px; }
+  .head > ha-icon { color: var(--primary-color); --mdc-icon-size: 22px; }
+  .head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .head .ic { margin: -6px -8px -6px auto; flex: none; border: none; background: none; color: var(--secondary-text-color); cursor: pointer;
+    border-radius: 50%; width: 40px; height: 40px; display: inline-grid; place-items: center; }
+  .head .ic:hover { background: var(--agenda-hover); }
+  .head .ic.on { color: var(--warning-color, #f57c00); }
+  .head .ic ha-icon { --mdc-icon-size: 22px; }
+  .away { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin: 8px 12px 4px; padding: 8px 12px; border-radius: 12px;
+    background: color-mix(in srgb, var(--warning-color, #f57c00) 14%, var(--card-background-color));
+    border: 1px solid color-mix(in srgb, var(--warning-color, #f57c00) 45%, transparent); font-size: 14px; font-weight: 500; cursor: default; }
+  .away ha-icon { color: var(--warning-color, #f57c00); --mdc-icon-size: 20px; }
+  .away span { margin-right: auto; }
+  .away button { font: inherit; font-size: 13px; font-weight: 500; border-radius: 99px; padding: 5px 12px; cursor: pointer;
+    border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
+  .away button:hover { background: var(--agenda-hover); }
   .body { padding: 4px 12px 14px; }
   .body.week { padding: 4px 0 0; }
   .scroll { overflow-x: auto; }
@@ -258,6 +346,7 @@ class AgendaCardEditor extends HTMLElement {
         : { name: "agendas", selector: { select: { multiple: true, options } } },
       { name: "title", selector: { text: {} } },
       ...(view === "week" ? [{ name: "hour_height", selector: { number: { min: 12, max: 60, mode: "box" } } }] : []),
+      { name: "absence", selector: { boolean: {} } },
     ];
     this._form.computeLabel = (s) =>
       ({
@@ -266,8 +355,9 @@ class AgendaCardEditor extends HTMLElement {
         agendas: T.card_agendas,
         title: T.card_title,
         hour_height: T.card_hour_height,
+        absence: T.card_absence,
       })[s.name] || s.name;
-    this._form.data = { ...this._config, view };
+    this._form.data = { ...this._config, view, absence: this._config.absence !== false };
   }
 
   _changed(value) {
@@ -277,6 +367,8 @@ class AgendaCardEditor extends HTMLElement {
       const v = config[key];
       if (v === "" || v == null || (Array.isArray(v) && !v.length)) delete config[key];
     }
+    // shown unless turned off: only false is written
+    if (config.absence !== false) delete config.absence;
     if (config.view === "week") delete config.agendas;
     else {
       delete config.agenda;

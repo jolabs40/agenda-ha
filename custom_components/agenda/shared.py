@@ -12,8 +12,8 @@ from datetime import date, datetime, time, timedelta
 import logging
 from typing import Any
 
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import Context, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError, Unauthorized
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.sun import get_astral_event_date
@@ -158,6 +158,17 @@ class Shared:
             return False
         until = self.absence_until()
         return until is None or at < until
+
+    async def async_check_editor(self, context: Context | None) -> None:
+        """Events and the absence, as in the panel: admins, or every user when allowed.
+
+        Automations and other calls without a user are let through.
+        """
+        if context is None or context.user_id is None or self.allow_users:
+            return
+        user = await self.hass.auth.async_get_user(context.user_id)
+        if user is not None and not user.is_admin:
+            raise Unauthorized(context=context)
 
     @callback
     def async_on_absence_change(self, listener: Callable[[], Any]) -> Callable[[], None]:

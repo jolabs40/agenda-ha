@@ -80,6 +80,8 @@ MANUAL_HOLDS = (MANUAL_NEXT_CHANGE, MANUAL_NEXT_DAY, MANUAL_NEVER, MANUAL_UNDO)
 NO_STATE = ("unavailable", "unknown")
 # an occurrence shown aside: its entity conditions do not hold now
 CONDITIONS_UNMET = "conditions"
+# ... or its event is turned off
+TURNED_OFF = "off"
 
 # reasons that take every device back, hand changes included
 TAKE_BACK = ("edit", "enabled", "absence", "override", "resume", "apply")
@@ -1103,6 +1105,7 @@ class Agenda:
         "busy" names the condition calendars with something on the day: the week marks them.
         Occurrences whose entity conditions do not hold now are put aside as well, as the
         schedule does: several events at the same time, one per mode, show only the one in charge.
+        So are those of an event turned off, which the week would lose otherwise.
         """
         ctx = await self.async_context_for(start, end)
 
@@ -1114,6 +1117,12 @@ class Agenda:
             entry(occ, reason=reason)
             for event in self.events
             for occ, reason in recurrence.skipped(event, self.tz, start, end, ctx)
+        ]
+        skipped += [
+            entry(occ, reason=TURNED_OFF)
+            for event in self.events
+            if not event.get("enabled", True)
+            for occ in recurrence.occurrences({**event, "enabled": True}, self.tz, start, end, ctx)
         ]
         holds = {event["id"]: self.conditions_hold(event) for event in self.events}
         found = []

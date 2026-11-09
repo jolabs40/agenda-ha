@@ -4,6 +4,14 @@
       "heating_rate": {
         "default": "mdi:thermometer-chevron-up"
       }
+    },
+    "switch": {
+      "absence": {
+        "default": "mdi:home-outline",
+        "state": {
+          "on": "mdi:home-export-outline"
+        }
+      }
     }
   },
   "services": {

@@ -427,10 +427,10 @@ class AgendaPanel extends HTMLElement {
           <button class="cb-btn" data-check="${esc(a.entry_id)}" role="checkbox" aria-checked="${on}" aria-label="${esc(a.name)}">${box(on ? "on" : "", color, textColor(color))}</button>
           <ha-icon class="sa-kind" icon="${esc(kinds.kindIcon(a))}" title="${esc(T.kinds[kinds.kindOf(a)] || "")}"></ha-icon>
           <button class="sa-name" data-solo="${esc(a.entry_id)}" title="${esc(`${a.name}\n${alone ? T.show_all : T.show_only}`)}"><b>${esc(a.name)}</b><small>${esc(this._summary(a))}</small></button>
-          <label class="tgl sm" title="${esc(a.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(a.entry_id)}" ${a.enabled ? "checked" : ""}><span></span></label>
           ${this._canSteer(a) && this._offSchedule(a).length ? `<button class="ic sm keep" data-resume="${esc(a.entry_id)}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}
           ${this._canSteer(a) && a.next_change ? `<button class="ic sm" data-advance="${esc(a.entry_id)}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}
-          ${this._isAdmin() ? `<button class="ic sm" data-settings="${esc(a.entry_id)}" title="${esc(T.settings)}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
+          <label class="tgl sm" title="${esc(a.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(a.entry_id)}" ${a.enabled ? "checked" : ""}><span></span></label>
+          ${this._isAdmin() ? `<button class="ic sm cog" data-settings="${esc(a.entry_id)}" title="${esc(T.settings)}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>`;
       })
       .join("");
@@ -1300,6 +1300,9 @@ const STYLES = `
   .sa .tgl { flex: none; }
   .sa .ic.sm { flex: none; width: 30px; height: 30px; opacity: 0; transition: opacity .15s; }
   .sa:hover .ic.sm, .sa .ic.sm:focus-visible, .sa .ic.sm.keep { opacity: .75; }
+  /* hidden until hovered, the settings of an agenda went unnoticed */
+  .sa .ic.sm.cog { opacity: .6; }
+  .sa:hover .ic.sm.cog, .sa .ic.sm.cog:focus-visible { opacity: .75; }
   .sa .ic.sm ha-icon { --mdc-icon-size: 18px; }
   @media (hover: none) { .sa .ic.sm { opacity: .6; } }
   .tgl.sm span { width: 28px; height: 16px; }

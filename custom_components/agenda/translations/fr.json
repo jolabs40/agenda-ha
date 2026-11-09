@@ -20,6 +20,9 @@
     "switch": {
       "enabled": {
         "name": "Actif"
+      },
+      "absence": {
+        "name": "Mode absence"
       }
     },
     "sensor": {

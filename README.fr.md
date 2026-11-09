@@ -30,6 +30,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
     journée se copie vers d'autres jours de la semaine.
     Un bloc nomme les calendriers dont dépend son événement et entoure celui qui le déclenche ce
     jour-là ; les jours qu'un calendrier retire d'une série apparaissent hachurés.
+    Un événement désactivé (Événement actif, dans son éditeur) apparaît pâle et barré, pour
+    l'ouvrir et le réactiver ; le bloc d'un événement qui a des actions porte une petite marque.
   - Mois : les événements de chaque jour, avec les jours fériés et les vacances scolaires.
   - Maison : tous les agendas sur une journée, avec ce que fait chaque appareil en ce moment et,
     pour les thermostats, la température mesurée tracée sous la consigne.
@@ -84,15 +86,16 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   température, ou un mode seul (ventilation, déshumidification).
 - Un mode absence pour toute la maison : les agendas qui le suivent gardent leur état d'absence
   jusqu'à une date, ou jusqu'à ce qu'on l'arrête. Les autres (lampes) peuvent simuler une présence
-  pendant ce temps.
+  pendant ce temps. Un interrupteur le montre aux automatisations, et la carte de tableau de bord
+  a son bouton.
 - Pour chaque agenda : une entité `calendar` (panneau Calendrier, déclencheurs de calendrier), un
   interrupteur Actif qui le suspend, les capteurs En ce moment et Prochain changement.
 - Des actions pour les automatisations et les assistants vocaux : sauter la prochaine occurrence,
   ajouter ou retirer des dates, déroger au planning, démarrer ou terminer le mode absence.
 - Le journal nomme l'agenda qui a changé un appareil, et deux événements permettent aux
   automatisations de réagir.
-- Les utilisateurs non administrateurs peuvent être autorisés à modifier les événements ; les
-  actions de début et de fin restent aux administrateurs.
+- Les utilisateurs non administrateurs peuvent être autorisés à modifier les événements et
+  l'absence ; les actions de début et de fin restent aux administrateurs.
 - Après un redémarrage, les appareils liés sont remis dans l'état prévu (désactivable par agenda),
   sauf ceux réglés à la main.
 - Une carte de tableau de bord, `custom:agenda-card`, avec un éditeur visuel.
@@ -249,6 +252,8 @@ Les actions fonctionnent comme dans les automatisations, avec trois variables en
 Seuls les administrateurs règlent les actions. Les utilisateurs autorisés à modifier les
 événements ne les voient pas, et leurs modifications gardent les actions en place.
 
+Dans la semaine, le bloc d'un événement qui a des actions porte une petite marque en bas à droite.
+
 ## Lever, coucher du soleil et conditions
 
 Les heures du soleil sont calculées par Home Assistant, jour par jour, pour l'emplacement réglé
@@ -281,11 +286,18 @@ dernière valeur pendant dix minutes.
 
 ## Mode absence
 
-Le bouton en haut du panneau le démarre, jusqu'à une date ou jusqu'à ce qu'on l'arrête ; les
-actions `agenda.set_absence` et `agenda.end_absence` font de même depuis une automatisation.
+Le bouton en haut du panneau, ou de la carte de tableau de bord, le démarre, jusqu'à une date ou
+jusqu'à ce qu'on l'arrête ; les actions `agenda.set_absence` et `agenda.end_absence` font de même
+depuis une automatisation.
 Pendant ce temps, chaque agenda qui le suit (une option de ses réglages) garde son état d'absence,
 ou à défaut son état par défaut, et ne lance aucune action. À la fin, chaque agenda reprend son
 programme.
+
+L'interrupteur `switch.agenda_absence` est allumé pendant une absence, avec sa fin dans l'attribut
+`until` (vide quand elle dure jusqu'à ce qu'on l'arrête) : une automatisation peut y réagir, et
+l'allumer démarre une absence jusqu'à ce qu'on l'éteigne. Comme dans le panneau, l'interrupteur
+et les deux actions sont réservés aux administrateurs, sauf si les réglages communs autorisent les
+utilisateurs à modifier les événements et l'absence ; les automatisations ne sont pas concernées.
 
 Un agenda qui ne le suit pas peut simuler une présence (Simulation de présence, dans ses
 réglages) : pendant une absence, ses débuts et ses fins bougent au hasard d'au plus le nombre de
@@ -399,6 +411,9 @@ agenda: Chambre
 ```
 
 La carte a un éditeur visuel. Un clic dessus ouvre le panneau.
+
+Chaque vue a un bouton pour démarrer ou terminer le mode absence, pour les utilisateurs qui en ont
+le droit, et un bandeau pendant une absence ; `absence: false` retire l'un et l'autre.
 
 ## Soutenir le projet
 

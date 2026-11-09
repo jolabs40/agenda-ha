@@ -64,12 +64,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _core_config_updated)
 
     async def _set_absence(call: ServiceCall) -> None:
+        await shared.async_check_editor(call.context)
         until = call.data.get("until")
         if until is not None:
             until = (dt_util.as_local(until) if until.tzinfo else until).strftime("%Y-%m-%dT%H:%M")
         await shared.async_set_absence(True, until)
 
-    async def _end_absence(_call: ServiceCall) -> None:
+    async def _end_absence(call: ServiceCall) -> None:
+        await shared.async_check_editor(call.context)
         await shared.async_set_absence(False)
 
     hass.services.async_register(

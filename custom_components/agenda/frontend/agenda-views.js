@@ -208,9 +208,12 @@ export function renderWeek(ctx) {
         const only = occ.reason === "only";
         // left aside by its entity conditions, as they are now, rather than by a calendar
         const unmet = occ.reason === "conditions";
+        // turned off: a click opens it, where it can be turned back on
+        const off = occ.reason === "off";
         const ids = (only || r.calendar_mode !== "only" ? r.calendars : r.except_calendars) || [];
-        const why = unmet ? "" : `${only ? T.calendar_only : T.calendar_exclude} (${ids.map(nameOf).join(", ")})`;
-        const sub = unmet ? T.conditions_unmet : T.skipped;
+        const why =
+          unmet || off ? "" : `${only ? T.calendar_only : T.calendar_exclude} (${ids.map(nameOf).join(", ")})`;
+        const sub = off ? T.event_off : unmet ? T.conditions_unmet : T.skipped;
         const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), timeOf(occ), sub, why];
         const short = (h / 60) * hourH < 40;
         const cond = short ? "" : condHtml(event, occ);
@@ -232,10 +235,13 @@ export function renderWeek(ctx) {
         const time = timeOf(occ);
         const short = (h / 60) * hourH < 40;
         const indent = Math.min(p.depth, 3) * 14;
+        // easy to forget once set: a mark on the block
+        const acts = (event.start_actions || []).length + (event.end_actions || []).length > 0;
         html += `<div class="ev ${short ? "short" : ""} ${occ.all_day ? "allday" : ""} ${p.first ? "" : "cont"} ${p.last ? "" : "open"}"
             style="top:${pct(p.from)};height:${pct(h)};left:calc(${indent}% + 2px);z-index:${2 + p.depth};--c:${esc(color)};--t:${esc(tc)};--a:${esc(agenda.settings.color)}"
-            ${occData(agenda, occ)} title="${esc([prefix, eventLabel(hass, agenda, event, T), time, condText(event)].filter(Boolean).join(" · "))}">
+            ${occData(agenda, occ)} title="${esc([prefix, eventLabel(hass, agenda, event, T), time, condText(event), acts ? T.with_actions : ""].filter(Boolean).join(" · "))}">
           ${event.icon ? `<ha-icon icon="${esc(event.icon)}"></ha-icon>` : ""}
+          ${acts ? `<ha-icon class="ev-act ${event.icon ? "beside" : ""}" icon="mdi:cog-play"></ha-icon>` : ""}
           <div class="ev-main">${esc(main)}</div>
           ${short ? "" : `<div class="ev-sub">${esc([prefix, subName, time].filter(Boolean).join(" · "))}</div>${condHtml(event, occ)}`}
           ${editable && !occ.all_day && p.last ? `<div class="ev-resize" data-resize="1"></div>` : ""}
@@ -631,6 +637,9 @@ export const VIEW_STYLES = `
   .ev.cont { border-top-left-radius: 0; border-top-right-radius: 0; }
   .ev.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
   .ev ha-icon { --mdc-icon-size: 15px; position: absolute; top: 3px; right: 4px; opacity: .8; }
+  .ev ha-icon.ev-act { top: auto; bottom: 3px; }
+  .ev.short ha-icon.ev-act { bottom: auto; top: calc(50% - 7.5px); }
+  .ev.short ha-icon.ev-act.beside { right: 22px; }
   .ev-main { font-weight: 700; font-size: 14px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ev-sub { font-size: 11px; line-height: 1.25; opacity: .85; white-space: normal; overflow: hidden; }
   .ev.short { display: flex; align-items: center; padding-top: 0; padding-bottom: 0; }
