@@ -178,6 +178,11 @@ Een herstart houdt deze wijzigingen, `agenda.resync` ook. Nu toepassen in de ins
 alle apparaten terug. De kolom toont "met de hand ingesteld tot...", en de sensor Nu noemt deze
 apparaten in het attribuut `set_by_hand`.
 
+Een thermostaat die zichzelf uitschakelt, is niet met de hand gewijzigd: Versatile Thermostat
+schakelt zichzelf uit bij een open raam, door zijn automatisch starten en stoppen of zijn
+centrale modus, en onthoudt wat er gevraagd is. De agenda gaat uit van dat verzoek: hij ziet de
+stop niet als een wijziging met de hand, en stuurt een Uit dat intussen valt toch.
+
 Afwijkingen veranderen het schema zelf, tot de tijd die ze tonen (`override_until` op de sensor
 Nu): Naar de volgende past de toestand van de volgende wissel meteen toe (nog eens: die daarna),
 Nu toepassen in de gebeurtenis-editor past de toestand van die gebeurtenis toe tot het einde van
@@ -395,7 +400,7 @@ thuis, gemarkeerd als Schoolvakantie.
 ```yaml
 type: custom:agenda-card
 view: house                       # alle agenda's, vandaag
-agendas: [Slaapkamer, Woonkamer]  # optioneel filter
+agendas: [Slaapkamer, Woonkamer]  # optioneel: alleen deze, in deze volgorde
 title: Verwarming                 # optioneel
 ```
 
@@ -403,19 +408,44 @@ title: Verwarming                 # optioneel
 type: custom:agenda-card
 view: week
 agenda: Slaapkamer
-hour_height: 32                   # optioneel
 ```
 
 ```yaml
 type: custom:agenda-card
 view: next                        # resterende tijd, toestand, volgende wissel, Naar de volgende en Hervatten
-agenda: Slaapkamer
+agendas: [Slaapkamer]
 ```
 
-De kaart heeft een visuele editor. Een klik erop opent het paneel.
+De kaart heeft een visuele editor. Een klik erop opent het paneel. Elke weergave heeft een knop om
+de afwezigheidsmodus te starten of te beëindigen, voor de gebruikers die dat mogen, en tijdens een
+afwezigheid een melding.
 
-Elke weergave heeft een knop om de afwezigheidsmodus te starten of te beëindigen, voor de
-gebruikers die dat mogen, en tijdens een afwezigheid een melding; `absence: false` laat beide weg.
+Alle opties zijn optioneel:
+
+| Optie | Weergave | Effect |
+|---|---|---|
+| `agendas` | house, next | de getoonde agenda's, in deze volgorde; anders allemaal, op naam |
+| `names` | alle | een andere naam in de kaart, bijvoorbeeld `names: {Boiler stel: Stel}` |
+| `title`, `icon` | alle | de kop; `title: ""` laat hem weg |
+| `absence: false` | alle | geen afwezigheidsknop of melding |
+| `tap_action` | alle | wat een klik doet, zoals in de kaarten van Home Assistant; standaard het paneel, `{action: none}` voor niets |
+| `start_hour`, `end_hour` | house | de getoonde uren, van 0 tot 24 |
+| `name_width`, `row_height` | house | breedte van de namen en hoogte van een rij, in pixels |
+| `live: false` | house | zonder de regel onder de naam met wat het apparaat nu doet |
+| `curve: false` | house | zonder temperatuurcurve |
+| `buttons: false` | next | zonder de knoppen Naar de volgende en Hervatten |
+| `days` | week | van 1 tot 7; minder dan 7 begint vandaag |
+| `hour_height` | week | hoogte van een uur, in pixels |
+
+## Een probleem melden
+
+In Instellingen > Apparaten & diensten > Agenda biedt het menu van de betreffende agenda Download
+diagnostieken: een bestand met de instellingen en gebeurtenissen, de apparaten zoals ze nu zijn, en
+de laatste opdrachten die ze kregen met wat elk apparaat toonde. Voeg het toe aan een issue op
+[GitHub](https://github.com/jolabs40/agenda-ha/issues), met wat je verwachtte, en wanneer.
+
+Voor meer biedt het menu bovenaan dezelfde pagina Schakel debug-logging in: wacht op het probleem,
+dan Schakel debug-logging uit, en Home Assistant downloadt het logboek.
 
 ## Steun
 

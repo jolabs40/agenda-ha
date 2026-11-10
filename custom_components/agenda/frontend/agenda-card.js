@@ -5,9 +5,26 @@
 //   type: custom:agenda-card
 //   view: house            # or week, or next
 //   agenda: Bedroom        # week view: name of the agenda
-//   agendas: [Bedroom]     # house and next views: only these agendas (optional)
-//   title: Heating         # optional
+//   agendas: [Bedroom]     # house and next views: only these agendas, in this order (optional)
+//   names: {Bedroom: Bed}  # a shorter name in the card (optional)
+//   title: Heating         # optional, "" for none
+//   icon: mdi:radiator     # optional
 //   absence: false         # no absence button nor banner (optional)
+//   tap_action: {action: none}   # optional, opens the panel by default
+//   start_hour: 6          # house view: the hours shown (optional)
+//   end_hour: 23
+//   name_width: 120        # house view, in px (optional)
+//   row_height: 32         # house view, in px (optional)
+//   live: false            # house view: no line of what each device does (optional)
+//   curve: false           # house view: no temperature curve (optional)
+//   buttons: false         # next view: no skip nor resume button (optional)
+//   days: 3                # week view: this many days from today (optional)
+//   hour_height: 24        # week view, in px (optional)
+
+const int = (value, min, max) => {
+  const n = Math.round(Number(value));
+  return value !== "" && value !== null && Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : undefined;
+};
 
 const V = new URL(import.meta.url).search;
 const lib = await import(`./agenda-lib.js${V}`);
@@ -84,6 +101,24 @@ class AgendaCard extends HTMLElement {
     return this._config?.view === "week" ? 10 : 4;
   }
 
+  /** The hours of the house view, [first, last], or null for the whole day. */
+  _hours() {
+    const c = this._config;
+    if (c.start_hour == null && c.end_hour == null) return null;
+    const first = int(c.start_hour ?? 0, 0, 23) ?? 0;
+    const last = int(c.end_hour ?? 24, first + 1, 24) ?? 24;
+    return [first, last];
+  }
+
+  /** The week view: a whole week from Monday, or fewer days from today. */
+  _days() {
+    return int(this._config.days ?? 7, 1, 7) ?? 7;
+  }
+
+  _firstDay(now) {
+    return this._config.view === "week" && this._days() === 7 ? mondayOf(now) : dayOf(now);
+  }
+
   _subscribe() {
     this._unsub = this._hass.connection.subscribeMessage(
       () => {
@@ -95,15 +130,23 @@ class AgendaCard extends HTMLElement {
     this._unsub.catch(() => (this._unsub = null));
   }
 
+  /** The agendas shown, in the order of the card's list, under the card's names. */
   _agendas() {
     const all = this._data?.agendas || [];
+    const find = (key) => all.find((a) => a.name === key || a.entry_id === key);
+    const names = this._config.names || {};
+    const named = (a) => {
+      const name = names[a.name] ?? names[a.entry_id];
+      return name ? { ...a, name: String(name) } : a;
+    };
     if (this._config.view !== "week") {
       const only = this._config.agendas;
-      return only ? all.filter((a) => only.includes(a.name) || only.includes(a.entry_id)) : all;
+      if (!only) return all.map(named);
+      const list = [].concat(only).map(find).filter(Boolean);
+      return list.filter((a, i) => list.indexOf(a) === i).map(named);
     }
-    const want = this._config.agenda;
-    const a = all.find((x) => x.name === want || x.entry_id === want) || all[0];
-    return a ? [a] : [];
+    const a = find(this._config.agenda) || all[0];
+    return a ? [named(a)] : [];
   }
 
   async _load() {
@@ -115,8 +158,8 @@ class AgendaCard extends HTMLElement {
         return;
       }
       const now = nowWall(this._data.time_zone);
-      const first = this._config.view === "week" ? mondayOf(now) : dayOf(now);
-      const days = this._config.view === "week" ? 7 : 1;
+      const first = this._firstDay(now);
+      const days = this._config.view === "week" ? this._days() : 1;
       const res = await this._hass.callWS({
         type: "agenda/occurrences",
         start: wallDate(first),
@@ -127,7 +170,7 @@ class AgendaCard extends HTMLElement {
       this._holidays = res.holidays || {};
       this._vacation = res.vacation || {};
       this._history =
-        this._config.view === "week"
+        this._config.view === "week" || this._config.curve === false
           ? {}
           : await lib
               .climateHistory((m) => this._hass.callWS(m), this._agendas(), first, this._data.time_zone)
@@ -175,12 +218,20 @@ class AgendaCard extends HTMLElement {
         now,
         editable: false,
       };
+      const c = this._config;
       // the same rights as editing events in the panel
-      const steer = this._canEdit();
-      if (this._config.view === "next") body = views.renderNext({ ...ctx, steer });
-      else if (this._config.view === "week")
-        body = `<div class="scroll">${views.renderWeek({ ...ctx, firstDay: mondayOf(now), days: 7, hourH: this._config.hour_height || 20 })}</div>`;
-      else body = views.renderHouse({ ...ctx, day: dayOf(now), history: this._history });
+      const steer = this._canEdit() && c.buttons !== false;
+      if (c.view === "next") body = views.renderNext({ ...ctx, steer });
+      else if (c.view === "week") {
+        const hourH = int(c.hour_height, 12, 60) ?? 20;
+        body = `<div class="scroll">${views.renderWeek({ ...ctx, firstDay: this._firstDay(now), days: this._days(), hourH })}</div>`;
+      } else {
+        const width = int(c.name_width, 40, 400);
+        const height = int(c.row_height, 16, 120);
+        const looks = `${width ? `--name-w: ${width}px;` : ""}${height ? `--row-h: ${height}px;` : ""}`;
+        const house = { ...ctx, day: dayOf(now), history: this._history, hours: this._hours(), live: c.live !== false };
+        body = `${looks ? `<style>.hs { ${looks} }</style>` : ""}${views.renderHouse(house)}`;
+      }
     }
     const view = this._config.view;
     const title =
@@ -191,12 +242,14 @@ class AgendaCard extends HTMLElement {
         ? `<button class="ic ${away ? "on" : ""}" data-absence title="${esc(T.absence_title)}" aria-label="${esc(T.absence_title)}">
             <ha-icon icon="mdi:home-export-outline"></ha-icon></button>`
         : "";
+    const icon = this._config.icon || "mdi:calendar-month";
     const head =
       title || awayButton
-        ? `<div class="head">${title ? `<ha-icon icon="mdi:calendar-month"></ha-icon><span>${esc(title)}</span>` : ""}${awayButton}</div>`
+        ? `<div class="head">${title ? `<ha-icon icon="${esc(icon)}"></ha-icon><span>${esc(title)}</span>` : ""}${awayButton}</div>`
         : "";
-    this.shadowRoot.querySelector("ha-card").innerHTML =
-      `${head}${this._data ? this._awayHtml(T) : ""}<div class="body ${this._config.view}">${body}</div>`;
+    const card = this.shadowRoot.querySelector("ha-card");
+    card.classList.toggle("still", this._config.tap_action?.action === "none");
+    card.innerHTML = `${head}${this._data ? this._awayHtml(T) : ""}<div class="body ${this._config.view}">${body}</div>`;
     requestAnimationFrame(() => views.fitLabels(this.shadowRoot));
   }
 
@@ -225,6 +278,19 @@ class AgendaCard extends HTMLElement {
     }
     // the banner is not a way into the panel
     if (e.target.closest(".away")) return;
+    const tap = this._config.tap_action;
+    if (tap?.action) {
+      // run by Home Assistant, as for its own cards
+      if (tap.action !== "none")
+        this.dispatchEvent(
+          new CustomEvent("hass-action", {
+            bubbles: true,
+            composed: true,
+            detail: { config: this._config, action: "tap" },
+          }),
+        );
+      return;
+    }
     history.pushState(null, "", "/agenda");
     window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
   }
@@ -271,6 +337,7 @@ const CARD_STYLES = `
     --agenda-vacation: #43a047;
   }
   ha-card { cursor: pointer; overflow: hidden; }
+  ha-card.still, ha-card.still .seg, ha-card.still .hs-name { cursor: default; }
   .head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px; font-size: 18px; font-weight: 500; }
   .head > ha-icon { color: var(--primary-color); --mdc-icon-size: 22px; }
   .head span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -331,49 +398,104 @@ class AgendaCardEditor extends HTMLElement {
       this._form.addEventListener("value-changed", (e) => this._changed(e.detail.value));
       this.replaceChildren(this._form);
     }
-    const view = this._config.view || "house";
+    const c = this._config;
+    const view = c.view || "house";
     const options = this._names.map((name) => ({ value: name, label: name }));
     const views = [
       ["house", T.house],
       ["week", T.week],
       ["next", T.next_changes],
     ].map(([value, label]) => ({ value, label }));
+    const number = (min, max) => ({ number: { min, max, mode: "box" } });
+    // one field per agenda shown, labelled with its own name
+    this._shown = view === "week" ? [c.agenda || this._names[0]].filter(Boolean) : [].concat(c.agendas || this._names);
+    this._nameFields = this._shown.map((name) => ({ name, selector: { text: {} } }));
+    const display = {
+      house: [
+        { name: "start_hour", selector: number(0, 23) },
+        { name: "end_hour", selector: number(1, 24) },
+        { name: "name_width", selector: number(40, 400) },
+        { name: "row_height", selector: number(16, 120) },
+        { name: "live", selector: { boolean: {} } },
+        { name: "curve", selector: { boolean: {} } },
+      ],
+      week: [
+        { name: "days", selector: number(1, 7) },
+        { name: "hour_height", selector: number(12, 60) },
+      ],
+      next: [{ name: "buttons", selector: { boolean: {} } }],
+    }[view];
     this._form.hass = this._hass;
     this._form.schema = [
       { name: "view", selector: { select: { mode: "dropdown", options: views } } },
       view === "week"
         ? { name: "agenda", selector: { select: { mode: "dropdown", options } } }
-        : { name: "agendas", selector: { select: { multiple: true, options } } },
+        : { name: "agendas", selector: { select: { multiple: true, reorder: true, options } } },
       { name: "title", selector: { text: {} } },
-      ...(view === "week" ? [{ name: "hour_height", selector: { number: { min: 12, max: 60, mode: "box" } } }] : []),
+      { name: "icon", selector: { icon: {} } },
       { name: "absence", selector: { boolean: {} } },
+      ...(this._nameFields.length
+        ? [{ type: "expandable", name: "names", title: T.card_names, icon: "mdi:rename", schema: this._nameFields }]
+        : []),
+      { type: "expandable", name: "", title: T.card_display, icon: "mdi:tune-variant", schema: display },
+      { name: "tap_action", selector: { ui_action: {} } },
     ];
-    this._form.computeLabel = (s) =>
-      ({
-        view: T.card_view,
-        agenda: T.agenda,
-        agendas: T.card_agendas,
-        title: T.card_title,
-        hour_height: T.card_hour_height,
-        absence: T.card_absence,
-      })[s.name] || s.name;
-    this._form.data = { ...this._config, view, absence: this._config.absence !== false };
+    const labels = {
+      view: T.card_view,
+      agenda: T.agenda,
+      agendas: T.card_agendas,
+      title: T.card_title,
+      icon: T.card_icon,
+      absence: T.card_absence,
+      tap_action: T.card_tap,
+      start_hour: T.card_start_hour,
+      end_hour: T.card_end_hour,
+      name_width: T.card_name_width,
+      row_height: T.card_row_height,
+      live: T.card_live,
+      curve: T.card_curve,
+      buttons: T.card_buttons,
+      days: T.card_days,
+      hour_height: T.card_hour_height,
+    };
+    this._form.computeLabel = (s) => (this._nameFields.includes(s) ? s.name : labels[s.name] || s.name);
+    // shown unless turned off
+    const on = (key) => c[key] !== false;
+    this._form.data = {
+      ...c,
+      view,
+      absence: on("absence"),
+      live: on("live"),
+      curve: on("curve"),
+      buttons: on("buttons"),
+      names: { ...(c.names || {}) },
+    };
   }
 
   _changed(value) {
     const config = { ...value };
+    // only the names of the agendas shown, and only those written
+    const names = Object.fromEntries(
+      Object.entries(config.names || {}).filter(([key, name]) => this._shown.includes(key) && String(name).trim()),
+    );
+    config.names = names;
     // empty fields are left out of the YAML
     for (const key of Object.keys(config)) {
       const v = config[key];
-      if (v === "" || v == null || (Array.isArray(v) && !v.length)) delete config[key];
+      const empty = v && typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length;
+      if (v === "" || v == null || (Array.isArray(v) && !v.length) || empty) delete config[key];
     }
     // shown unless turned off: only false is written
-    if (config.absence !== false) delete config.absence;
-    if (config.view === "week") delete config.agendas;
-    else {
-      delete config.agenda;
-      delete config.hour_height;
-    }
+    for (const key of ["absence", "live", "curve", "buttons"]) if (config[key] !== false) delete config[key];
+    const only = {
+      house: ["agendas", "start_hour", "end_hour", "name_width", "row_height", "live", "curve"],
+      week: ["agenda", "days", "hour_height"],
+      next: ["agendas", "buttons"],
+    };
+    const view = config.view || "house";
+    const others = new Set(Object.values(only).flat());
+    for (const key of only[view]) others.delete(key);
+    for (const key of others) delete config[key];
     this._config = config;
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
     this._render();

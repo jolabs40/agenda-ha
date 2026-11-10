@@ -175,6 +175,12 @@ Ein Neustart behält diese Änderungen, `agenda.resync` ebenso. Jetzt anwenden i
 holt alle Geräte zurück. Die Spalte zeigt "von Hand eingestellt bis...", und der Sensor Jetzt
 listet diese Geräte im Attribut `set_by_hand`.
 
+Ein Thermostat, das sich selbst abschaltet, wurde nicht von Hand geändert: Versatile Thermostat
+schaltet sich bei offenem Fenster, durch sein automatisches Starten und Stoppen oder seinen
+zentralen Modus selbst ab und behält, was von ihm verlangt wurde. Die Agenda richtet sich nach
+dieser Anforderung: Sie hält den Stopp nicht für eine Änderung von Hand und sendet ein
+zwischenzeitlich fälliges Aus trotzdem.
+
 Abweichungen ändern den Zeitplan selbst, bis zu der Uhrzeit, die sie anzeigen (`override_until`
 am Sensor Jetzt): Zum Nächsten wendet den Zustand des nächsten Wechsels sofort an (noch einmal:
 den danach), Jetzt anwenden im Termineditor wendet den Zustand dieses Termins bis zum Ende seines
@@ -390,29 +396,53 @@ markieren und einen täglichen ganztägigen Termin mit der Temperatur für zu Ha
 
 ```yaml
 type: custom:agenda-card
-view: house                        # alle Agenden, heute
-agendas: [Schlafzimmer, Wohnzimmer] # optionaler Filter
-title: Heizung                     # optional
+view: house                         # alle Agenden, heute
+agendas: [Schlafzimmer, Wohnzimmer] # optional: nur diese, in dieser Reihenfolge
+title: Heizung                      # optional
 ```
 
 ```yaml
 type: custom:agenda-card
 view: week
 agenda: Schlafzimmer
-hour_height: 32                    # optional
 ```
 
 ```yaml
 type: custom:agenda-card
-view: next                         # Restzeit, Zustand, nächster Wechsel, Zum Nächsten und Fortsetzen
-agenda: Schlafzimmer
+view: next                          # Restzeit, Zustand, nächster Wechsel, Zum Nächsten und Fortsetzen
+agendas: [Schlafzimmer]
 ```
 
-Die Karte hat einen visuellen Editor. Ein Klick darauf öffnet das Panel.
+Die Karte hat einen visuellen Editor. Ein Klick darauf öffnet das Panel. Jede Ansicht hat einen
+Knopf, um den Abwesenheitsmodus zu starten oder zu beenden, für die Benutzer, die es dürfen, und
+während einer Abwesenheit einen Hinweis.
 
-Jede Ansicht hat einen Knopf, um den Abwesenheitsmodus zu starten oder zu beenden, für die
-Benutzer, die es dürfen, und während einer Abwesenheit einen Hinweis; `absence: false` lässt
-beides weg.
+Alle Optionen sind optional:
+
+| Option | Ansicht | Wirkung |
+|---|---|---|
+| `agendas` | house, next | die angezeigten Agenden, in dieser Reihenfolge; sonst alle, nach Name |
+| `names` | alle | ein anderer Name in der Karte, zum Beispiel `names: {Warmwasser Paar: Paar}` |
+| `title`, `icon` | alle | die Kopfzeile; `title: ""` lässt sie weg |
+| `absence: false` | alle | weder Abwesenheitsknopf noch Hinweis |
+| `tap_action` | alle | was ein Klick tut, wie bei den Karten von Home Assistant; standardmäßig das Panel, `{action: none}` für nichts |
+| `start_hour`, `end_hour` | house | die angezeigten Stunden, von 0 bis 24 |
+| `name_width`, `row_height` | house | Breite der Namen und Höhe einer Zeile, in Pixeln |
+| `live: false` | house | ohne die Zeile unter dem Namen, was das Gerät gerade tut |
+| `curve: false` | house | ohne Temperaturkurve |
+| `buttons: false` | next | ohne die Knöpfe Zum Nächsten und Fortsetzen |
+| `days` | week | von 1 bis 7; weniger als 7 beginnt heute |
+| `hour_height` | week | Höhe einer Stunde, in Pixeln |
+
+## Ein Problem melden
+
+Unter Einstellungen > Geräte & Dienste > Agenda bietet das Menü der betroffenen Agenda
+Diagnosedaten herunterladen: eine Datei mit ihren Einstellungen und Terminen, ihren Geräten, wie
+sie gerade sind, und den letzten gesendeten Befehlen mit dem, was jedes Gerät anzeigte. Diese an
+ein Issue auf [GitHub](https://github.com/jolabs40/agenda-ha/issues) anhängen, mit dem, was erwartet wurde, und wann.
+
+Für mehr bietet das Menü oben auf derselben Seite Debug-Protokoll aktivieren: auf das Problem
+warten, dann Debug-Protokoll deaktivieren, und Home Assistant lädt das Protokoll herunter.
 
 ## Unterstützung
 

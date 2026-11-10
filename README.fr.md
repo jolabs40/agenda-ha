@@ -175,6 +175,11 @@ Un redémarrage garde ces réglages, `agenda.resync` aussi. Appliquer maintenant
 reprend tous les appareils. La colonne affiche "réglé à la main jusqu'à...", et le capteur En ce
 moment liste ces appareils dans son attribut `set_by_hand`.
 
+Un thermostat qui s'arrête de lui-même n'est pas réglé à la main : Versatile Thermostat s'éteint
+seul pour une fenêtre ouverte, son arrêt et relance automatique ou son mode central, et garde ce
+qu'on lui a demandé. L'agenda se fie à cette demande : il ne prend pas l'arrêt pour un réglage à
+la main, et envoie quand même un Arrêt prévu entre-temps.
+
 Les dérogations changent le planning lui-même, jusqu'à l'heure qu'elles affichent
 (`override_until` sur le capteur En ce moment) : Passer au suivant applique tout de suite l'état
 du prochain changement (encore une fois : celui d'après), Appliquer maintenant dans l'éditeur
@@ -393,7 +398,7 @@ maison, marqué Vacances scolaires.
 ```yaml
 type: custom:agenda-card
 view: house                 # tous les agendas, aujourd'hui
-agendas: [Chambre, Salon]   # filtre facultatif
+agendas: [Chambre, Salon]   # facultatif : seulement ceux-là, dans cet ordre
 title: Chauffage            # facultatif
 ```
 
@@ -401,19 +406,45 @@ title: Chauffage            # facultatif
 type: custom:agenda-card
 view: week
 agenda: Chambre
-hour_height: 32             # facultatif
 ```
 
 ```yaml
 type: custom:agenda-card
 view: next                  # temps restant, état, prochain changement, Passer au suivant et Reprendre
-agenda: Chambre
+agendas: [Chambre]
 ```
 
-La carte a un éditeur visuel. Un clic dessus ouvre le panneau.
+La carte a un éditeur visuel. Un clic dessus ouvre le panneau. Chaque vue a un bouton pour démarrer
+ou terminer le mode absence, pour les utilisateurs qui en ont le droit, et un bandeau pendant une
+absence.
 
-Chaque vue a un bouton pour démarrer ou terminer le mode absence, pour les utilisateurs qui en ont
-le droit, et un bandeau pendant une absence ; `absence: false` retire l'un et l'autre.
+Toutes les options sont facultatives :
+
+| Option | Vue | Effet |
+|---|---|---|
+| `agendas` | house, next | les agendas affichés, dans cet ordre ; sinon tous, par nom |
+| `names` | toutes | un autre nom dans la carte, par exemple `names: {Chauffe-eau couple: Couple}` |
+| `title`, `icon` | toutes | l'en-tête ; `title: ""` le retire |
+| `absence: false` | toutes | ni bouton ni bandeau d'absence |
+| `tap_action` | toutes | l'effet d'un clic, comme dans les cartes de Home Assistant ; le panneau par défaut, `{action: none}` pour rien |
+| `start_hour`, `end_hour` | house | les heures affichées, de 0 à 24 |
+| `name_width`, `row_height` | house | largeur des noms et hauteur d'une ligne, en pixels |
+| `live: false` | house | sans la ligne sous le nom qui dit ce que fait l'appareil |
+| `curve: false` | house | sans courbe de température |
+| `buttons: false` | next | sans les boutons Passer au suivant et Reprendre |
+| `days` | week | de 1 à 7 ; moins de 7 commence aujourd'hui |
+| `hour_height` | week | hauteur d'une heure, en pixels |
+
+## Signaler un problème
+
+Dans Paramètres > Appareils et services > Agenda, le menu de l'agenda concerné propose Télécharger
+les diagnostics : un fichier avec ses réglages et ses événements, ses appareils tels qu'ils sont, et
+les dernières commandes envoyées avec ce que chaque appareil affichait. Le joindre à un ticket sur
+[GitHub](https://github.com/jolabs40/agenda-ha/issues), avec ce qui était attendu, et quand.
+
+Pour aller plus loin, le menu en haut de la même page propose Activer la journalisation de débogage :
+attendre le problème, puis Désactiver la journalisation de débogage, et Home Assistant télécharge le
+journal.
 
 ## Soutenir le projet
 

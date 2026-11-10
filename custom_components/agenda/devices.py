@@ -141,6 +141,25 @@ def fit(entity_id: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any]
     return {**wanted, field: value}
 
 
+def asked(entity_id: str, current: str, attributes: Mapping[str, Any]) -> tuple[str, Mapping[str, Any]]:
+    """The mode and attributes of a thermostat as they were asked, when it tells them apart.
+
+    Versatile Thermostat turns itself off or changes its preset on its own (open window,
+    auto start and stop, central mode, safety) and keeps the request in requested_state.
+    The agenda is followed as long as the request is the agenda's: else it would take
+    a stop for a hand change, and skip an Off the thermostat later forgets.
+    """
+    request = attributes.get("requested_state")
+    if domain_of(entity_id) != "climate" or not isinstance(request, Mapping) or not request.get("hvac_mode"):
+        return current, attributes
+    view = dict(attributes)
+    if isinstance(request.get("target_temperature"), (int, float)):
+        view["temperature"] = request["target_temperature"]
+    if request.get("preset"):
+        view["preset_mode"] = request["preset"]
+    return str(request["hvac_mode"]), view
+
+
 def _switch_on(
     current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any], last_mode: str | None
 ) -> Call | None:
@@ -180,6 +199,7 @@ def plan(
     domain = domain_of(entity_id)
     wanted = fit(entity_id, attributes, wanted)
     kind = wanted.get("type")
+    current, attributes = asked(entity_id, current, attributes)
     calls: list[Call] = []
     if attributes.get("assumed_state") and domain != "climate":
         # without feedback the state shown is only a guess, it may be wrong: always send
@@ -265,11 +285,19 @@ def moving(entity_id: str, current: str) -> bool:
     return domain_of(entity_id) == "cover" and current in ("opening", "closing")
 
 
-def reached(entity_id: str, current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any]) -> bool:
-    """Whether the entity shows the wanted state. True when this cannot be told."""
+def reached(
+    entity_id: str, current: str, attributes: Mapping[str, Any], wanted: Mapping[str, Any], as_asked: bool = True
+) -> bool:
+    """Whether the entity shows the wanted state. True when this cannot be told.
+
+    as_asked: a thermostat that keeps what it was asked counts by its request (see asked),
+    not by what it does now.
+    """
     domain = domain_of(entity_id)
     wanted = fit(entity_id, attributes, wanted)
     kind = wanted.get("type")
+    if as_asked:
+        current, attributes = asked(entity_id, current, attributes)
 
     if domain == "climate":
         if kind == "off":

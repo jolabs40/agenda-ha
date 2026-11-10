@@ -223,7 +223,7 @@ class Agenda:
     async def async_save(self) -> None:
         await self._store.async_save({"settings": self.settings, "enabled": self.enabled, "events": self.events})
 
-    def _runtime_data(self) -> dict[str, Any]:
+    def runtime_data(self) -> dict[str, Any]:
         override = self.override
         return {
             "holds": {e: until.isoformat() if until else None for e, until in self.control.holds.items()},
@@ -236,7 +236,7 @@ class Agenda:
 
     @callback
     def _save_runtime(self) -> None:
-        self._runtime.async_delay_save(self._runtime_data, 1)
+        self._runtime.async_delay_save(self.runtime_data, 1)
 
     async def async_remove_storage(self) -> None:
         await self._store.async_remove()
@@ -327,7 +327,7 @@ class Agenda:
 
     @callback
     def _on_ha_stop(self, _event: Event) -> None:
-        self._runtime.async_delay_save(self._runtime_data, 0)
+        self._runtime.async_delay_save(self.runtime_data, 0)
 
     @callback
     def async_stop(self) -> None:

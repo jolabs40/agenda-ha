@@ -49,6 +49,14 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_TIMEOUT_S = 30
 OWN_CONTEXTS = 64
+# last steps kept for the diagnostics
+JOURNAL_SIZE = 80
+
+
+def _shown(state: State) -> dict[str, Any]:
+    """What a device shows, as far as the agenda is concerned."""
+    keys = ("temperature", "preset_mode", "hvac_action", "current_position", "brightness", "requested_state")
+    return {"state": state.state, **{k: state.attributes[k] for k in keys if k in state.attributes}}
 
 
 def _issue_id(entry_id: str, entity_id: str) -> str:
@@ -98,6 +106,11 @@ class Control:
         self._undone: dict[str, list[float]] = {}
         self._timers: dict[str, Callable[[], None]] = {}
         self._unsub: Callable[[], None] | None = None
+        self.journal: deque[dict[str, Any]] = deque(maxlen=JOURNAL_SIZE)
+
+    def note(self, entity_id: str, step: str, **details: Any) -> None:
+        """Keep a step for the diagnostics."""
+        self.journal.append({"at": dt_util.utcnow().isoformat(), "entity_id": entity_id, "step": step, **details})
 
     def own(self, context: Context | None) -> bool:
         """Whether a state change comes from one of Agenda's commands."""
@@ -175,12 +188,14 @@ class Control:
             and not devices.reached(entity_id, new.state, new.attributes, wanted)
         ):
             self.touched.add(entity_id)
+            self.note(entity_id, "changed by hand", shown=_shown(new), user=new.context.user_id)
             self.agenda.manual_change(entity_id)
         elif entity_id in self.holds and not self.own(new.context):
             # put back as the agenda wants it now: the agenda takes it back. What it sent
             # last may be older, or unknown after a restart
             now_wanted, _ = self.agenda.desired()
             if now_wanted is not None and devices.reached(entity_id, new.state, new.attributes, now_wanted):
+                self.note(entity_id, "put back by hand", shown=_shown(new))
                 self.agenda.manual_end(entity_id)
 
     @callback
@@ -208,6 +223,7 @@ class Control:
         agenda = self.agenda
         state = self.hass.states.get(entity_id)
         if state is None or devices.unavailable(state.state, state.attributes):
+            self.note(entity_id, "unavailable", reason=reason, wanted=copy.deepcopy(wanted))
             if entity_id not in self.waiting:
                 _LOGGER.warning(
                     "Agenda %s: %s is not available, it will get its state when it is back", agenda.name, entity_id
@@ -222,6 +238,15 @@ class Control:
         self._own.append(context.id)
         calls = devices.plan(entity_id, state.state, state.attributes, wanted, self.last_mode.get(entity_id))
         assumed = bool(state.attributes.get("assumed_state"))
+        self.note(
+            entity_id,
+            "sent" if calls else "nothing to send",
+            reason=reason,
+            attempt=attempt,
+            wanted=copy.deepcopy(wanted),
+            shown=_shown(state),
+            calls=[f"{domain}.{service} {data}" for domain, service, data in calls],
+        )
         if calls:
             event = agenda.event(occ.event_id) if occ else None
             data = {
@@ -267,6 +292,7 @@ class Control:
             # vol.Invalid: an input_number refuses a value out of its range that way
             except (HomeAssistantError, TimeoutError, ValueError, vol.Invalid) as err:
                 _LOGGER.error("Agenda %s: %s refused %s.%s %s: %s", name, entity_id, domain, service, data, err)
+                self.note(entity_id, "refused", call=f"{domain}.{service} {data}", error=repr(err))
                 return
 
     @callback
@@ -333,11 +359,13 @@ class Control:
             self.waiting.add(entity_id)
             return
         if devices.reached(entity_id, state.state, state.attributes, wanted):
+            self.note(entity_id, "checked", shown=_shown(state))
             ir.async_delete_issue(self.hass, DOMAIN, _issue_id(agenda.entry_id, entity_id))
             return
         if devices.moving(entity_id, state.state) and tries < CHECK_MOVING_TRIES:
             self._later(entity_id, CHECK_DELAY_S, self._async_check, wanted, attempt, tries + 1)
             return
+        self.note(entity_id, "not shown", attempt=attempt, shown=_shown(state))
         if attempt == 1:
             _LOGGER.info("Agenda %s: %s does not show %s, sending it again", agenda.name, entity_id, wanted)
             async with agenda.run_lock:

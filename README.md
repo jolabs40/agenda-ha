@@ -163,6 +163,11 @@ A restart keeps these changes, and so does `agenda.resync`. Apply now in the set
 device back. The column shows "set by hand until...", and the Now sensor lists these devices in its
 `set_by_hand` attribute.
 
+A thermostat that stops by itself is not changed by hand: Versatile Thermostat turns itself off
+for an open window, its auto start and stop or its central mode, and keeps what it was asked. The
+agenda goes by that request: it does not take the stop for a hand change, and still sends an Off
+due meanwhile.
+
 Overrides change the schedule itself, until the time they show (`override_until` on the Now
 sensor): Skip to next applies the state of the next change at once (again: the one after), Apply
 now in the event editor applies that event's state until the end of its next occurrence. Resume
@@ -368,28 +373,52 @@ term, and add an all-day daily event at the home temperature marked School holid
 
 ```yaml
 type: custom:agenda-card
-view: house                    # every agenda, today
-agendas: [Bedroom, Living room] # optional filter
-title: Heating                 # optional
+view: house                     # every agenda, today
+agendas: [Bedroom, Living room] # optional: only these, in this order
+title: Heating                  # optional
 ```
 
 ```yaml
 type: custom:agenda-card
 view: week
 agenda: Bedroom
-hour_height: 32                # optional
 ```
 
 ```yaml
 type: custom:agenda-card
-view: next                     # time left, state now, next change, Skip to next and Resume
-agenda: Bedroom
+view: next                      # time left, state now, next change, Skip to next and Resume
+agendas: [Bedroom]
 ```
 
-The card has a visual editor. Clicking it opens the panel.
+The card has a visual editor. Clicking it opens the panel. Every view has a button to start or end
+the absence mode, for the users allowed to, and a banner during an absence.
 
-Every view has a button to start or end the absence mode, for the users allowed to, and a banner
-during an absence; `absence: false` leaves both out.
+Every option is optional:
+
+| Option | View | Effect |
+|---|---|---|
+| `agendas` | house, next | the agendas shown, in this order; all of them by name otherwise |
+| `names` | all | another name in the card, for example `names: {Water heater couple: Couple}` |
+| `title`, `icon` | all | the header; `title: ""` leaves it out |
+| `absence: false` | all | no absence button nor banner |
+| `tap_action` | all | what a click does, as in the cards of Home Assistant; the panel by default, `{action: none}` for nothing |
+| `start_hour`, `end_hour` | house | the hours shown, from 0 to 24 |
+| `name_width`, `row_height` | house | width of the names and height of a row, in pixels |
+| `live: false` | house | no line under the name with what the device does now |
+| `curve: false` | house | no temperature curve |
+| `buttons: false` | next | no Skip to next nor Resume button |
+| `days` | week | from 1 to 7; fewer than 7 starts today |
+| `hour_height` | week | height of an hour, in pixels |
+
+## Reporting a problem
+
+In Settings > Devices & services > Agenda, the menu of the agenda concerned has Download
+diagnostics: a file with its settings and events, its devices as they are now, and the last
+commands sent to them with what each device showed. Attach it to an issue on
+[GitHub](https://github.com/jolabs40/agenda-ha/issues), with what you expected and when.
+
+For more, the menu at the top of the same page has Enable debug logging: wait for the problem, then
+Disable debug logging, and Home Assistant downloads the log.
 
 ## Support
 

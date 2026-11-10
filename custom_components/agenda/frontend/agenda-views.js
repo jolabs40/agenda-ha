@@ -36,8 +36,22 @@ function occData(agenda, occ) {
   return `data-entry="${esc(agenda.entry_id)}" data-event="${esc(occ.event_id)}" data-day="${esc(occ.day)}" data-start="${esc(occ.start)}" data-end="${esc(occ.end)}" data-allday="${occ.all_day ? 1 : 0}"`;
 }
 
-/** Hide labels that do not fit their block. */
+/** Hide labels that do not fit their block, and hours too close to the one before. */
 export function fitLabels(root) {
+  root.querySelectorAll(".hs-ticks").forEach((ticks) => {
+    const spans = [...ticks.children];
+    spans.forEach((span) => (span.style.visibility = ""));
+    const shown = [];
+    for (const span of spans) {
+      const prev = shown[shown.length - 1];
+      if (!prev || span.getBoundingClientRect().left >= prev.getBoundingClientRect().right + 4) shown.push(span);
+      // the last hour stays, the one before it goes
+      else if (span === spans[spans.length - 1] && shown.length > 1) {
+        prev.style.visibility = "hidden";
+        shown[shown.length - 1] = span;
+      } else span.style.visibility = "hidden";
+    }
+  });
   root.querySelectorAll(".seg span, .gap span").forEach((span) => {
     span.style.visibility = "";
     const box = span.parentElement;
@@ -355,7 +369,7 @@ export function renderMonth(ctx) {
 
 /** The day's measured temperature (line) and the device's own setpoint (dashed steps) of a
  *  thermostat agenda, over its track. points: [[wall minute, measured, setpoint], ...]. */
-function climateCurve(points, day, until) {
+function climateCurve(points, day, until, from = 0, span = DAY) {
   const values = points.flatMap(([, c, t]) => [c, t]).filter((v) => typeof v === "number");
   if (!values.length) return "";
   let lo = Math.min(...values);
@@ -388,24 +402,33 @@ function climateCurve(points, day, until) {
   if (last !== null) measured.push(`${x(until)},${y(last)}`);
   if (set !== null) steps += `M${x(since)},${y(set)}H${x(until)}`;
   const line = measured.length > 1 ? measured.join(" ") : "";
-  return `<svg class="hs-curve" viewBox="0 0 ${DAY} 100" preserveAspectRatio="none" aria-hidden="true">
+  return `<svg class="hs-curve" viewBox="${from} 0 ${span} 100" preserveAspectRatio="none" aria-hidden="true">
     ${steps ? `<path class="halo" d="${steps}"/><path class="tgt" d="${steps}"/>` : ""}
     ${line ? `<polyline class="halo" points="${line}"/><polyline class="cur" points="${line}"/>` : ""}</svg>`;
 }
 
-/** ctx: { hass, T, agendas, occ, day, now, history } */
+/** ctx: { hass, T, agendas, occ, day, now, history, hours, live }
+ *  hours: [first, last] hour shown, the whole day by default; live: false leaves out what
+ *  each device does now. */
 export function renderHouse(ctx) {
   const { hass, T, agendas, day, now } = ctx;
-  const ticks = [0, 3, 6, 9, 12, 15, 18, 21, 24]
-    .map((h) => `<span style="left:${pct(h * 60)}">${String(h).padStart(2, "0")}h</span>`)
-    .join("");
+  const [h0, h1] = ctx.hours || [0, 24];
+  const from = h0 * 60;
+  const span = (h1 - h0) * 60;
+  const at = (m) => `${(((m - from) / span) * 100).toFixed(4)}%`;
+  const long = (m) => `${((m / span) * 100).toFixed(4)}%`;
+  // at most nine ticks, one grid line each
+  const step = Math.ceil((h1 - h0) / 8);
+  const hours = [];
+  for (let h = h0; h <= h1; h += step) hours.push(h);
+  const ticks = hours.map((h) => `<span style="left:${at(h * 60)}">${String(h).padStart(2, "0")}h</span>`).join("");
   const isToday = dayOf(now) === day;
   // the history ends now on today, at midnight on a day gone by
   const until = isToday ? now : day + DAY;
   let curves = 0;
   const curveOf = (agenda) => {
     const points = agenda.settings.kind === "climate" && ctx.history?.[(agenda.settings.entities || [])[0]];
-    const svg = points?.length && day <= now ? climateCurve(points, day, until) : "";
+    const svg = points?.length && day <= now ? climateCurve(points, day, until, from, span) : "";
     if (svg) curves += 1;
     return svg;
   };
@@ -414,7 +437,7 @@ export function renderHouse(ctx) {
     .map((agenda) => {
       const occs = ctx.occ[agenda.entry_id] || [];
       const withState = hasStates(agenda);
-      const segs = effectiveTimeline(agenda, occs, day, day + DAY, withState);
+      const segs = effectiveTimeline(agenda, occs, day + from, day + from + span, withState);
       const segHtml = segs
         .map((seg) => {
           const w = seg.to - seg.from;
@@ -439,22 +462,24 @@ export function renderHouse(ctx) {
             label = "";
           }
           const tip = `${hhmm(seg.from - day)}–${hhmm(seg.to - day)}${label ? " · " + label : ""}`;
-          return `<div class="${cls}" style="left:${pct(seg.from - day)};width:${pct(w)};--c:${esc(color)};--t:${esc(textColor(color))}" ${data} title="${esc(tip)}">
-            ${w >= 75 && label ? `<span>${esc(label)}</span>` : ""}</div>`;
+          return `<div class="${cls}" style="left:${at(seg.from - day)};width:${long(w)};--c:${esc(color)};--t:${esc(textColor(color))}" ${data} title="${esc(tip)}">
+            ${(w * DAY) / span >= 75 && label ? `<span>${esc(label)}</span>` : ""}</div>`;
         })
         .join("");
       const target = agenda.events.find((e) => e.id === agenda.preheat?.next?.event_id);
       const early = (target && preheatBands(agenda, day, 1)[day]) || [];
       const earlyHtml = early
+        .map((p) => [Math.max(p.from, from), Math.min(p.to, from + span)])
+        .filter(([a, b]) => b > a)
         .map(
-          (p) =>
-            `<div class="early" style="left:${pct(p.from)};width:${pct(p.to - p.from)};--c:${esc(eventColor(hass, agenda, target))}"></div>`,
+          ([a, b]) =>
+            `<div class="early" style="left:${at(a)};width:${long(b - a)};--c:${esc(eventColor(hass, agenda, target))}"></div>`,
         )
         .join("");
       return `<div class="hs-row ${agenda.enabled ? "" : "paused"}">
         <div class="hs-name" data-select="${esc(agenda.entry_id)}">
           <span class="dot" style="--c:${esc(agenda.settings.color)}"></span>
-          <div><b>${esc(agenda.name)}</b><small><ha-icon icon="${liveIcon(agenda)}"></ha-icon><span data-live="${esc(agenda.entry_id)}">${esc(liveText(hass, agenda, T))}</span></small></div>
+          <div><b>${esc(agenda.name)}</b>${ctx.live === false ? "" : `<small><ha-icon icon="${liveIcon(agenda)}"></ha-icon><span data-live="${esc(agenda.entry_id)}">${esc(liveText(hass, agenda, T))}</span></small>`}</div>
         </div>
         <div class="hs-track">${segHtml}${earlyHtml}${curveOf(agenda)}</div>
       </div>`;
@@ -464,11 +489,13 @@ export function renderHouse(ctx) {
   const xRows = (ctx.external || [])
     .map((cal) => {
       const segs = (splitByDay(cal.events, day, 1)[day] || [])
-        .map(({ occ, from, to }) => {
-          const w = to - from;
-          const tip = [occ.all_day ? "" : `${hhmm(from)}–${hhmm(to)}`, occ.summary].filter(Boolean).join(" · ");
-          return `<div class="seg xseg" style="left:${pct(from)};width:${pct(w)};--c:${esc(cal.color)}" data-xev="${esc(cal.id)}" data-xi="${occ.i}" title="${esc(tip)}">
-            ${w >= 75 && occ.summary ? `<span>${esc(occ.summary)}</span>` : ""}</div>`;
+        .filter(({ from: a, to: b }) => b > from && a < from + span)
+        .map(({ occ, from: a, to: b }) => {
+          const [left, right] = [Math.max(a, from), Math.min(b, from + span)];
+          const w = right - left;
+          const tip = [occ.all_day ? "" : `${hhmm(a)}–${hhmm(b)}`, occ.summary].filter(Boolean).join(" · ");
+          return `<div class="seg xseg" style="left:${at(left)};width:${long(w)};--c:${esc(cal.color)}" data-xev="${esc(cal.id)}" data-xi="${occ.i}" title="${esc(tip)}">
+            ${(w * DAY) / span >= 75 && occ.summary ? `<span>${esc(occ.summary)}</span>` : ""}</div>`;
         })
         .join("");
       return `<div class="hs-row xrow">
@@ -480,11 +507,13 @@ export function renderHouse(ctx) {
     .join("");
 
   // one line across every room, its dot on the hour scale
-  const nowLine = isToday ? `<div class="hs-now" style="--f:${((now - day) / DAY).toFixed(5)}"></div>` : "";
+  const f = (now - day - from) / span;
+  const nowLine = isToday && f >= 0 && f <= 1 ? `<div class="hs-now" style="--f:${f.toFixed(5)}"></div>` : "";
   const legend = curves
     ? `<small class="hs-legend"><i class="cur"></i>${esc(T.measured)} <i class="tgt"></i>${esc(T.device_setpoint)}</small>`
     : "";
-  return `<div class="hs">
+  const slots = (h1 - h0) / step;
+  return `<div class="hs"${slots === 8 ? "" : ` style="--slots:${slots}"`}>
     <div class="hs-scale"><div class="hs-name">${legend}</div><div class="hs-ticks">${ticks}</div></div>
     ${rows}${xRows}${nowLine}
   </div>`;
@@ -736,8 +765,8 @@ export const VIEW_STYLES = `
   .hs-name small:has(span:empty) { display: none; }
   .hs-row .dot { width: 12px; height: 12px; }
   .hs-row.paused { opacity: .5; }
-  .hs-track { position: relative; height: 46px; border-radius: 10px; overflow: hidden; background: var(--agenda-track);
-    background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / 8 - 1px), var(--agenda-line) calc(100% / 8 - 1px), var(--agenda-line) calc(100% / 8)); }
+  .hs-track { position: relative; height: var(--row-h, 46px); border-radius: 10px; overflow: hidden; background: var(--agenda-track);
+    background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / var(--slots, 8) - 1px), var(--agenda-line) calc(100% / var(--slots, 8) - 1px), var(--agenda-line) calc(100% / var(--slots, 8))); }
   .seg { position: absolute; top: 0; bottom: 0; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
     background: var(--c); color: var(--t); border-right: 1px solid rgba(255,255,255,.35); cursor: pointer; overflow: hidden; transition: filter .15s; }
   .seg:hover { filter: brightness(1.06) saturate(1.1); }

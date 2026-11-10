@@ -210,7 +210,8 @@ class Preheater:
         if dt_util.utcnow() - since < timedelta(seconds=CHECK_DELAY_S):
             return True
         wanted = self.agenda.control.applied.get(entity_id)
-        return wanted is not None and devices.reached(entity_id, state.state, state.attributes, wanted)
+        # what it does, not what it was asked: a thermostat that stopped for a window no longer rises
+        return wanted is not None and devices.reached(entity_id, state.state, state.attributes, wanted, as_asked=False)
 
     @callback
     def _measure_changed(self, entity_id: str) -> None:
