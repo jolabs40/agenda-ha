@@ -50,6 +50,8 @@ Assistant in het Nederlands staat.
   kolom aan; ze verschijnen gearceerd in week, maand en huis, alleen ter informatie.
 - Een gebeurtenis kan meerdere dagen duren, van de ene datum en tijd tot de andere, herhaald of
   niet. Haar uitzonderingen kijken naar de dag waarop ze begint.
+- Een agenda kan haar gebeurtenissen van een hele dag in de week onder de datum tonen, in plaats
+  van als blok over de hele kolom: handig voor naamdagen en verjaardagen.
 - Herhaling elke N dagen, weken (op gekozen weekdagen, of alleen in even of oneven weken) of
   maanden (op dezelfde datum, op de 2e maandag, op de laatste vrijdag...), eventueel tot een datum.
   Losse dagen kun je uit een reeks halen of eraan toevoegen.
@@ -119,6 +121,13 @@ Wat een agenda kan aansturen:
 
 Thermostaten die de temperatuur van hun modi publiceren (Versatile Thermostat doet dat), tonen die
 naast de naam van de modus.
+
+Opties van een keuzelijst die een verwarmingsniveau noemen, zoals bij een stuurdraad (Comfort,
+Comfort -1, Comfort -2, Eco, Vorstbeveiliging, Uit, ook in het Engels, Frans of Duits), krijgen de
+kleur van de modus met dezelfde naam: Comfort oranje, Eco lichtblauw, Vorstbeveiliging blauwgrijs.
+Het pictogram van een gebeurtenis kan op Auto blijven: het volgt dan de toestand, een zon voor
+Comfort, een maan voor Eco, een sneeuwvlok voor Vorstbeveiliging, een vlam voor een airco die
+verwarmt.
 
 | Huisweergave | Gebeurtenis-editor | Telefoon |
 |---|---|---|
@@ -268,14 +277,14 @@ Instellingen > Systeem > Algemeen. Als de zon het einde van een gebeurtenis vó�
 Niet voor en Uiterlijk begrenzen een zonnetijd: rolluiken die bij zonsondergang sluiten, maar niet
 voor 18:00.
 
-Voorwaarden vergelijken de toestand van een entiteit: `person.alex` is `home`,
-`binary_sensor.raam` is niet `on`, `sensor.buitentemperatuur` is onder `5`. Bij meerdere
-voorwaarden vraagt de gebeurtenis ze allemaal, of minstens één ervan. Ze worden gelezen bij het
-begin van de gebeurtenis en bij elke wijziging van de entiteit. Een gebeurtenis waarvan de
-voorwaarden niet meer kloppen, laat het over aan de volgende gebeurtenis, of aan de
-standaardtoestand; haar acties aan het einde lopen toch. Een entiteit die onbeschikbaar wordt,
-houdt tien minuten haar laatste toestand, ook over een herstart: een sensor die even wegvalt,
-verandert niets.
+Voorwaarden vergelijken de toestand van een entiteit: `person.alex` is `home`, `binary_sensor.raam`
+is niet `on`, `sensor.buitentemperatuur` is onder `5`. Bij meerdere voorwaarden vraagt de
+gebeurtenis ze allemaal, of minstens één ervan. Ze worden gelezen bij het begin van de gebeurtenis
+en bij elke wijziging van de entiteit. Een gebeurtenis waarvan de voorwaarden niet meer kloppen,
+laat het over aan de volgende gebeurtenis, of aan de standaardtoestand; haar acties aan het einde
+lopen toch. Een gebeurtenis waarvan de voorwaarden bij het begin niet klopten, start noch haar
+acties bij het begin, noch die aan het einde. Een entiteit die onbeschikbaar wordt, houdt tien
+minuten haar laatste toestand, ook over een herstart: een sensor die even wegvalt, verandert niets.
 
 De week tekent een gebeurtenis waarvan de voorwaarden nu niet kloppen bleek en doorgestreept, zoals
 een dag die een agenda weghaalt: met één gebeurtenis per modus op hetzelfde moment verschijnt alleen

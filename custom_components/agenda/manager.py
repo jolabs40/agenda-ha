@@ -5,8 +5,8 @@ wanted state, then the start actions run. Handling ends before starts keeps the
 end of one event from undoing the next one when they are back to back.
 
 An event with conditions takes charge (state and start actions) only while they
-hold; its end actions always run. During the absence mode an agenda that follows
-it keeps its away state and runs no action.
+hold; its end actions run only if they held at its start. During the absence
+mode an agenda that follows it keeps its away state and runs no action.
 
 A device changed by hand is left alone until the next change of the agenda, the next
 day, or not at all (setting manual_hold). An override puts the state of an event, or
@@ -136,6 +136,8 @@ class Agenda:
         self._changed: set[str] = set()
         # last real state of each condition entity, and since when it has none (None: it has one)
         self._known: dict[str, tuple[str, datetime | None]] = {}
+        # occurrences their conditions kept out at the start, until their end: no end actions for them
+        self._refused: dict[str, datetime] = {}
         self._unsub_wait: Callable[[], None] | None = None
         self._unsub_stop: Callable[[], None] | None = None
         self._unsub_absence: Callable[[], None] | None = None
@@ -218,6 +220,9 @@ class Agenda:
             since = moment(since) or now
             if now - since < CONDITION_WAIT:
                 self._known[entity_id] = (state, since)
+        for key, end in (runtime.get("refused") or {}).items():
+            if (end := moment(end)) and end > now:
+                self._refused[key] = end
         self.preheater.load(runtime)
 
     async def async_save(self) -> None:
@@ -231,6 +236,7 @@ class Agenda:
             "conditions": {
                 e: [state, since.isoformat() if since else None] for e, (state, since) in self._known.items()
             },
+            "refused": {key: end.isoformat() for key, end in self._refused.items()},
             **self.preheater.storage(),
         }
 
@@ -386,22 +392,29 @@ class Agenda:
             self._save_runtime()
         occs = self.occurrences(since, until + timedelta(seconds=1))
         ended = sorted((o for o in occs if since < o.end <= until), key=lambda o: o.end)
-        started = sorted(
-            (o for o in occs if since < o.start <= until and self.conditions_hold(self.event(o.event_id))),
-            key=lambda o: o.start,
-        )
+        starting = sorted((o for o in occs if since < o.start <= until), key=lambda o: o.start)
+        started = [o for o in starting if self.conditions_hold(self.event(o.event_id))]
+        refused = {self._occ_key(o): o.end for o in starting if o not in started}
+        if refused or any(end <= since for end in self._refused.values()):
+            self._refused = {key: end for key, end in self._refused.items() if end > since} | refused
+            self._save_runtime()
         self._notify()
         if not self.enabled or self.absent() or not (ended or started or expired):
             return
         async with self.run_lock:
             for occ in ended:
-                await self._async_run_actions(occ, "end")
+                if self._refused.pop(self._occ_key(occ), None) is None:
+                    await self._async_run_actions(occ, "end")
             if self.linked:
                 # resend the state when an event starts, to override manual changes
                 force = expired or any(self.event(o.event_id).get("state") for o in started)
                 await self.async_apply_state(force=force, reason="schedule")
             for occ in started:
                 await self._async_run_actions(occ, "start")
+
+    @staticmethod
+    def _occ_key(occ: recurrence.Occurrence) -> str:
+        return f"{occ.event_id} {occ.start.isoformat()}"
 
     async def _async_run_actions(self, occ: recurrence.Occurrence, phase: str) -> None:
         event = self.event(occ.event_id)
@@ -824,10 +837,11 @@ class Agenda:
         self.settings.update(settings)
         if name and name != self.entry.title:
             self.hass.config_entries.async_update_entry(self.entry, title=name)
-        if settings.get("presence_jitter") == 0:
+        for key, off in (("presence_jitter", 0), ("all_day_header", False)):
             # off is not stored either
-            del settings["presence_jitter"]
-            self.settings.pop("presence_jitter", None)
+            if key in settings and settings[key] == off:
+                del settings[key]
+                self.settings.pop(key, None)
         if settings.get("manual_hold") == MANUAL_NEXT_CHANGE:
             # the default is not stored: older versions refuse unknown settings
             del settings["manual_hold"]

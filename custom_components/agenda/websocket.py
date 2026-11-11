@@ -225,6 +225,7 @@ SETTINGS_SCHEMA = vol.Schema(
             vol.Coerce(int), vol.Range(min=PREHEAT_LIMIT_MIN, max=PREHEAT_LIMIT_MAX)
         ),
         vol.Optional("temperature_sensor"): vol.Any(None, cv.entity_domain("sensor")),
+        vol.Optional("all_day_header"): bool,
     }
 )
 

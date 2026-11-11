@@ -22,9 +22,8 @@ const {
   wallTime,
   wm,
 } = await import(`./agenda-lib.js${V}`);
-const { eventColor, eventLabel, hasStates, liveIcon, liveText, stateColor, stateLabel } = await import(
-  `./agenda-kinds.js${V}`
-);
+const { eventColor, eventIcon, eventLabel, hasStates, liveIcon, liveText, shortStateLabel, stateColor, stateLabel } =
+  await import(`./agenda-kinds.js${V}`);
 const { preheatBands, preheatNote } = await import(`./agenda-preheat.js${V}`);
 
 export { liveText };
@@ -55,8 +54,14 @@ export function fitLabels(root) {
   root.querySelectorAll(".seg span, .gap span").forEach((span) => {
     span.style.visibility = "";
     const box = span.parentElement;
-    if (span.offsetWidth > box.clientWidth - 4 || span.offsetHeight > box.clientHeight)
-      span.style.visibility = "hidden";
+    const over = () => span.offsetWidth > box.clientWidth - 4 || span.offsetHeight > box.clientHeight;
+    // a shorter label before none
+    if (span.dataset.short) {
+      span.dataset.full ??= span.textContent;
+      span.textContent = span.dataset.full;
+      if (over()) span.textContent = span.dataset.short;
+    }
+    if (over()) span.style.visibility = "hidden";
   });
   root.querySelectorAll(".ev, .ghost").forEach((ev) => {
     const sub = ev.querySelector(".ev-sub");
@@ -93,6 +98,44 @@ export function renderWeek(ctx) {
       for (const piece of split[d]) (piece.occ.all_day ? xHead : xCol)[d].push({ ...piece, cal });
   }
   const xData = (cal, occ) => `data-xev="${esc(cal.id)}" data-xi="${occ.i}"`;
+
+  // pieces per day, all agendas together; ghosts are the days a calendar condition removes, and
+  // the events whose entity conditions do not hold now. An agenda may keep its all-day events
+  // under the date, as other calendars do.
+  const perDay = Object.fromEntries(dayList.map((d) => [d, []]));
+  const ghosts = Object.fromEntries(dayList.map((d) => [d, []]));
+  const ownHead = Object.fromEntries(dayList.map((d) => [d, []]));
+  for (const agenda of agendas) {
+    const byId = Object.fromEntries(agenda.events.map((e) => [e.id, e]));
+    for (const [occs, into] of [
+      [ctx.occ[agenda.entry_id], perDay],
+      [ctx.skipped?.[agenda.entry_id], ghosts],
+    ]) {
+      const split = splitByDay(occs || [], firstDay, days);
+      for (const d of dayList) {
+        for (const piece of split[d]) {
+          const event = byId[piece.occ.event_id];
+          if (!event) continue;
+          if (piece.occ.all_day && agenda.settings.all_day_header)
+            ownHead[d].push({ ...piece, agenda, event, ghost: into === ghosts });
+          else into[d].push({ ...piece, agenda, event });
+        }
+      }
+    }
+  }
+  const ghostText = (occ) =>
+    occ.reason === "off" ? T.event_off : occ.reason === "conditions" ? T.conditions_unmet : T.skipped;
+  const headChip = (x) => {
+    if (x.cal)
+      return `<button class="wk-x" ${xData(x.cal, x.occ)} style="--c:${esc(x.cal.color)}" title="${esc([x.cal.name, x.occ.summary].filter(Boolean).join(" · "))}">${esc(x.occ.summary || x.cal.name)}</button>`;
+    const { agenda, event, occ } = x;
+    const color = eventColor(hass, agenda, event);
+    const label = eventLabel(hass, agenda, event, T);
+    const tip = [single ? "" : agenda.name, label, T.all_day, x.ghost ? ghostText(occ) : ""].filter(Boolean);
+    // a day left aside opens the series, as its ghost in a column does
+    const data = x.ghost ? `data-entry="${esc(agenda.entry_id)}" data-ghost="${esc(event.id)}"` : occData(agenda, occ);
+    return `<button class="wk-x ${x.ghost ? "off" : "own"}" ${data} style="--c:${esc(color)};--t:${esc(event.text_color || textColor(color))}" title="${esc(tip.join(" · "))}">${esc(label)}</button>`;
+  };
   const head = dayList
     .map((d, i) => {
       const isToday = d === today;
@@ -105,14 +148,9 @@ export function renderWeek(ctx) {
       let note = "";
       if (holiday) note = `<span class="wk-hol">${esc(holiday)}</span>`;
       else if (vacationStarts) note = `<span class="wk-vac">${esc(school || T.vacation)}</span>`;
-      const xs = xHead[d];
+      const xs = [...ownHead[d], ...xHead[d]];
       const xShown = xs.length > 3 ? xs.slice(0, 2) : xs;
-      note += xShown
-        .map(
-          ({ cal, occ }) =>
-            `<button class="wk-x" ${xData(cal, occ)} style="--c:${esc(cal.color)}" title="${esc([cal.name, occ.summary].filter(Boolean).join(" · "))}">${esc(occ.summary || cal.name)}</button>`,
-        )
-        .join("");
+      note += xShown.map(headChip).join("");
       if (xs.length > xShown.length) note += `<span class="wk-xmore">+${xs.length - xShown.length}</span>`;
       return `<div class="wk-day ${isToday ? "today" : ""} ${holiday ? "holiday" : ""} ${onVacation ? "vacation" : ""}" ${tip ? `title="${esc(tip)}"` : ""}>
         ${editable && days === 7 ? `<button class="wk-copy" data-copy-day="${d}" title="${esc(T.copy_day)}"><ha-icon icon="mdi:content-copy"></ha-icon></button>` : ""}
@@ -128,25 +166,6 @@ export function renderWeek(ctx) {
     (_, h) => `<div class="wk-h"><span>${h ? `${String(h).padStart(2, "0")}:00` : ""}</span></div>`,
   ).join("");
 
-  // pieces per day, all agendas together; ghosts are the days a calendar condition removes, and
-  // the events whose entity conditions do not hold now
-  const perDay = Object.fromEntries(dayList.map((d) => [d, []]));
-  const ghosts = Object.fromEntries(dayList.map((d) => [d, []]));
-  for (const agenda of agendas) {
-    const byId = Object.fromEntries(agenda.events.map((e) => [e.id, e]));
-    for (const [occs, into] of [
-      [ctx.occ[agenda.entry_id], perDay],
-      [ctx.skipped?.[agenda.entry_id], ghosts],
-    ]) {
-      const split = splitByDay(occs || [], firstDay, days);
-      for (const d of dayList) {
-        for (const piece of split[d]) {
-          const event = byId[piece.occ.event_id];
-          if (event) into[d].push({ ...piece, agenda, event });
-        }
-      }
-    }
-  }
   // early starts, over the blocks: what runs until then is often an event of its own
   const earlyOf = (d) =>
     agendas.flatMap((agenda) => {
@@ -251,11 +270,12 @@ export function renderWeek(ctx) {
         const indent = Math.min(p.depth, 3) * 14;
         // easy to forget once set: a mark on the block
         const acts = (event.start_actions || []).length + (event.end_actions || []).length > 0;
+        const icon = eventIcon(agenda, event);
         html += `<div class="ev ${short ? "short" : ""} ${occ.all_day ? "allday" : ""} ${p.first ? "" : "cont"} ${p.last ? "" : "open"}"
             style="top:${pct(p.from)};height:${pct(h)};left:calc(${indent}% + 2px);z-index:${2 + p.depth};--c:${esc(color)};--t:${esc(tc)};--a:${esc(agenda.settings.color)}"
             ${occData(agenda, occ)} title="${esc([prefix, eventLabel(hass, agenda, event, T), time, condText(event), acts ? T.with_actions : ""].filter(Boolean).join(" · "))}">
-          ${event.icon ? `<ha-icon icon="${esc(event.icon)}"></ha-icon>` : ""}
-          ${acts ? `<ha-icon class="ev-act ${event.icon ? "beside" : ""}" icon="mdi:cog-play"></ha-icon>` : ""}
+          ${icon ? `<ha-icon icon="${esc(icon)}"></ha-icon>` : ""}
+          ${acts ? `<ha-icon class="ev-act ${icon ? "beside" : ""}" icon="mdi:cog-play"></ha-icon>` : ""}
           <div class="ev-main">${esc(main)}</div>
           ${short ? "" : `<div class="ev-sub">${esc([prefix, subName, time].filter(Boolean).join(" · "))}</div>${condHtml(event, occ)}`}
           ${editable && !occ.all_day && p.last ? `<div class="ev-resize" data-resize="1"></div>` : ""}
@@ -443,18 +463,19 @@ export function renderHouse(ctx) {
           const w = seg.to - seg.from;
           let color;
           let label;
+          let short = "";
           let cls = "seg";
           let data = `data-entry="${esc(agenda.entry_id)}" data-gap-day="${day}" data-gap-from="${seg.from}"`;
           if (seg.occ) {
             color = eventColor(hass, agenda, seg.event);
-            label =
-              withState && seg.event.state
-                ? stateLabel(hass, agenda, seg.event.state, T, false)
-                : eventLabel(hass, agenda, seg.event, T);
+            const st = withState && seg.event.state;
+            label = st ? stateLabel(hass, agenda, st, T, false) : eventLabel(hass, agenda, seg.event, T);
+            if (st) short = shortStateLabel(hass, agenda, st, T);
             data = occData(agenda, seg.occ);
           } else if (withState && agenda.settings.default_state) {
             color = stateColor(hass, agenda, agenda.settings.default_state);
             label = stateLabel(hass, agenda, agenda.settings.default_state, T, false);
+            short = shortStateLabel(hass, agenda, agenda.settings.default_state, T);
             cls += " gap";
           } else {
             cls += " empty";
@@ -463,7 +484,7 @@ export function renderHouse(ctx) {
           }
           const tip = `${hhmm(seg.from - day)}–${hhmm(seg.to - day)}${label ? " · " + label : ""}`;
           return `<div class="${cls}" style="left:${at(seg.from - day)};width:${long(w)};--c:${esc(color)};--t:${esc(textColor(color))}" ${data} title="${esc(tip)}">
-            ${(w * DAY) / span >= 75 && label ? `<span>${esc(label)}</span>` : ""}</div>`;
+            ${(w * DAY) / span >= 30 && label ? `<span${short ? ` data-short="${esc(short)}"` : ""}>${esc(label)}</span>` : ""}</div>`;
         })
         .join("");
       const target = agenda.events.find((e) => e.id === agenda.preheat?.next?.event_id);
@@ -706,6 +727,8 @@ export const VIEW_STYLES = `
   .wk-x { display: block; max-width: calc(100% - 6px); box-sizing: border-box; margin-top: 1px; padding: 0 6px; border-radius: 6px; font: inherit;
     font-size: 10.5px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: var(--primary-text-color);
     border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent); background: color-mix(in srgb, var(--c) 18%, transparent); }
+  .wk-x.own { border-style: solid; background: var(--c); color: var(--t); font-weight: 600; }
+  .wk-x.off { text-decoration: line-through; }
   .wk-xmore { font-size: 10.5px; color: var(--secondary-text-color); }
   .wk-col.has-x .ev, .wk-col.has-x .ghost, .wk-col.has-x .gap, .wk-col.has-x .early { right: calc(26% + 2px); }
   .xev { position: absolute; width: 25%; min-height: 12px; box-sizing: border-box; border-radius: 6px; padding: 2px 4px; overflow: hidden; z-index: 1;

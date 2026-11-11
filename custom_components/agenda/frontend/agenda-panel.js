@@ -823,7 +823,7 @@ class AgendaPanel extends HTMLElement {
         agenda.events.find((x) => x.id === el.dataset.edit),
         null,
       );
-    } else if ((el = hit(".seg[data-event], .mo-ev[data-event]"))) {
+    } else if ((el = hit(".seg[data-event], .mo-ev[data-event], .wk-x[data-event]"))) {
       this._openOccurrence(el);
     } else if ((el = hit("[data-ghost]"))) {
       // a day the series does not run: only the series can be edited

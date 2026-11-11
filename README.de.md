@@ -50,6 +50,8 @@ auf Deutsch eingestellt ist.
   Spalte ankreuzen und erscheinen schraffiert in Woche, Monat und Haus, nur zur Information.
 - Ein Termin kann mehrere Tage dauern, von einem Datum und einer Uhrzeit bis zu anderen, wiederholt
   oder nicht. Seine Ausnahmen richten sich nach dem Tag, an dem er beginnt.
+- Eine Agenda kann ihre ganztägigen Termine in der Woche unter dem Datum zeigen, statt als Block
+  über die ganze Spalte: praktisch für Namenstage und Geburtstage.
 - Wiederholung alle N Tage, Wochen (an gewählten Wochentagen, oder nur in geraden oder ungeraden
   Wochen) oder Monate (am gleichen Datum, am 2. Montag, am letzten Freitag...), auf Wunsch bis zu
   einem Datum. Einzelne Tage lassen sich aus einer Serie entfernen oder hinzufügen.
@@ -118,6 +120,12 @@ Was eine Agenda steuern kann:
 
 Bei Thermostaten, die die Temperaturen ihrer Modi veröffentlichen (Versatile Thermostat tut das),
 erscheinen sie neben den Namen der Modi.
+
+Optionen einer Auswahl, die eine Heizstufe nennen, etwa bei einem Steuerdraht (Komfort, Komfort -1,
+Komfort -2, Eco, Frostschutz, Aus, auch auf Englisch, Französisch oder Niederländisch), bekommen die
+Farbe des gleichnamigen Modus: Komfort orange, Eco hellblau, Frostschutz blaugrau. Das Symbol eines
+Termins kann auf Auto bleiben: Es folgt dann dem Zustand, eine Sonne für Komfort, ein Mond für Eco,
+eine Schneeflocke für Frostschutz, eine Flamme für eine heizende Klimaanlage.
 
 | Hausansicht | Termineditor | Telefon |
 |---|---|---|
@@ -268,12 +276,13 @@ statt. Nicht vor und Spätestens begrenzen eine Sonnenzeit: Rollläden, die bei 
 schließen, aber nicht vor 18:00.
 
 Bedingungen vergleichen den Zustand einer Entität: `person.alex` ist `home`, `binary_sensor.fenster`
-ist nicht `on`, `sensor.aussentemperatur` ist unter `5`. Bei mehreren Bedingungen braucht der
-Termin alle oder mindestens eine davon. Sie werden zu Beginn des Termins und bei jeder Änderung der
-Entität gelesen. Ein Termin, dessen Bedingungen nicht mehr erfüllt sind, überlässt die Steuerung
-dem nächsten Termin oder dem Standardzustand; seine Aktionen am Ende laufen trotzdem. Eine Entität,
-die nicht mehr verfügbar ist, behält ihren letzten Zustand zehn Minuten lang, auch über einen
-Neustart: ein Sensor, der kurz ausfällt, ändert nichts.
+ist nicht `on`, `sensor.aussentemperatur` ist unter `5`. Bei mehreren Bedingungen braucht der Termin
+alle oder mindestens eine davon. Sie werden zu Beginn des Termins und bei jeder Änderung der Entität
+gelesen. Ein Termin, dessen Bedingungen nicht mehr erfüllt sind, überlässt die Steuerung dem
+nächsten Termin oder dem Standardzustand; seine Aktionen am Ende laufen trotzdem. Ein Termin, dessen
+Bedingungen zu Beginn nicht erfüllt waren, startet weder seine Aktionen zu Beginn noch die am Ende.
+Eine Entität, die nicht mehr verfügbar ist, behält ihren letzten Zustand zehn Minuten lang, auch
+über einen Neustart: ein Sensor, der kurz ausfällt, ändert nichts.
 
 Die Woche zeichnet einen Termin, dessen Bedingungen gerade nicht erfüllt sind, blass und
 durchgestrichen, wie einen Tag, den ein Kalender entfernt: mit einem Termin pro Modus zur selben

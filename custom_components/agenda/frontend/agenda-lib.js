@@ -223,6 +223,22 @@ export function gradient(stops, value) {
 
 export const OFF_COLOR = "#9e9e9e";
 
+// colours offered for an agenda or an event
+export const SWATCHES = [
+  "#ef6c00",
+  "#e53935",
+  "#d81b60",
+  "#8e24aa",
+  "#3949ab",
+  "#1e88e5",
+  "#00897b",
+  "#43a047",
+  "#c0ca33",
+  "#fdd835",
+  "#6d4c41",
+  "#546e7a",
+];
+
 export function textColor(bg) {
   if (!bg || bg[0] !== "#" || bg.length !== 7) return "#212121";
   const [r, g, b] = hexRgb(bg).map((v) => {

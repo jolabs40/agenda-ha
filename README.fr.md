@@ -48,6 +48,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   dans la même colonne et s'affichent hachurés en semaine, mois et maison, pour information.
 - Un événement peut durer plusieurs jours, d'une date et d'une heure à d'autres, répété ou non.
   Ses exceptions regardent le jour où il commence.
+- Un agenda peut garder ses événements d'une journée entière sous la date, dans la semaine,
+  plutôt qu'en bloc sur toute la colonne : pratique pour les fêtes et les anniversaires.
 - Répétition tous les N jours, semaines (jours au choix, ou seulement les semaines paires ou
   impaires) ou mois (même date, 2e lundi, dernier vendredi...), éventuellement jusqu'à une date.
   On peut retirer ou ajouter des jours à une série.
@@ -117,6 +119,12 @@ Ce qu'un agenda peut commander :
 
 Pour les thermostats qui publient la température de leurs modes (c'est le cas de Versatile
 Thermostat), elle s'affiche à côté du nom du mode.
+
+Les options d'un sélecteur qui nomment un niveau de chauffage, celles d'un fil pilote par exemple
+(Confort, Confort -1, Confort -2, Eco, Hors gel, Arrêt ou Off), prennent la couleur du mode du même
+nom : Confort en orange, Eco en bleu, Hors gel en gris bleuté. L'icône d'un événement peut rester
+sur Auto : elle suit alors son état, un soleil pour Confort, une lune pour Eco, un flocon pour Hors
+gel, une flamme pour un climatiseur qui chauffe.
 
 | Vue Maison | Éditeur d'événement | Téléphone |
 |---|---|---|
@@ -272,6 +280,8 @@ n'est pas `on`, `sensor.temperature_exterieure` est en dessous de `5`. Avec plus
 l'événement les demande toutes, ou au moins l'une d'elles. Elles sont lues au début de l'événement
 et à chaque changement de l'entité. Un événement dont les conditions ne sont plus remplies laisse
 la main à l'événement suivant, ou à l'état par défaut ; ses actions de fin s'exécutent quand même.
+Celui dont les conditions n'étaient pas remplies à son début ne lance ni ses actions de début, ni
+celles de fin.
 Une entité qui devient indisponible garde son dernier état pendant dix minutes, redémarrage
 compris : un capteur qui décroche un instant ne change rien.
 

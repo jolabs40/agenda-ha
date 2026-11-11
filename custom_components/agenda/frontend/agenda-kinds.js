@@ -168,11 +168,102 @@ export function commonOptions(hass, agenda) {
   return common || [];
 }
 
+// selector options that name a heating level (pilot wire and the like), matched without case or accents
+const OPTION_NAMES = {
+  comfort: ["comfort", "confort", "komfort"],
+  comfort_1: ["comfort1", "confort1", "komfort1"],
+  comfort_2: ["comfort2", "confort2", "komfort2"],
+  eco: ["eco", "economy", "economie"],
+  frost: ["frost", "horsgel", "antigel", "frostschutz", "vorst", "vorstbeveiliging"],
+  away: ["away", "absent", "abwesend", "afwezig"],
+  boost: ["boost"],
+  off: ["off", "arret", "eteint", "aus", "uit"],
+};
+const OPTION_KEYS = Object.fromEntries(
+  Object.entries(OPTION_NAMES).flatMap(([key, names]) => names.map((name) => [name, key])),
+);
+const plain = (text) =>
+  String(text)
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+const optionKey = (option) => OPTION_KEYS[plain(option)];
+// a degree or two below comfort, as on the setpoint scale
+const NAMED_COLORS = { ...PRESET_COLORS, comfort_1: "#aed581", comfort_2: "#4db6ac", off: OFF_COLOR };
+
 function optionColor(hass, agenda, option) {
+  const named = NAMED_COLORS[optionKey(option)];
+  if (named) return named;
+  // the other options share the colours the named ones leave
   const options = commonOptions(hass, agenda);
-  let i = options.indexOf(option);
+  const taken = new Set(options.map((o) => NAMED_COLORS[optionKey(o)]));
+  const free = OPTION_COLORS.filter((c) => !taken.has(c));
+  let i = options.filter((o) => !optionKey(o)).indexOf(option);
   if (i < 0) i = [...String(option)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-  return OPTION_COLORS[i % OPTION_COLORS.length];
+  return free[i % free.length];
+}
+
+export const AUTO_ICON = "auto";
+const NAMED_ICONS = {
+  comfort: "mdi:weather-sunny",
+  comfort_1: "mdi:weather-sunset",
+  comfort_2: "mdi:weather-sunset",
+  eco: "mdi:weather-night",
+  frost: "mdi:snowflake",
+  off: "mdi:power-off",
+  boost: "mdi:rocket-launch",
+  away: "mdi:home-export-outline",
+  home: "mdi:home",
+  sleep: "mdi:bed",
+  activity: "mdi:motion-sensor",
+};
+const MODE_ICONS = {
+  heat: "mdi:fire",
+  cool: "mdi:snowflake",
+  heat_cool: "mdi:sun-snowflake-variant",
+  auto: "mdi:thermostat-auto",
+  dry: "mdi:water-percent",
+  fan_only: "mdi:fan",
+};
+
+/** Icon of a state, for an event whose icon is left on Auto; null when none fits. */
+export function autoIcon(agenda, st) {
+  switch (st?.type) {
+    case "preset":
+      return NAMED_ICONS[st.preset] || MODE_ICONS[st.hvac_mode] || null;
+    case "temperature":
+    case "mode":
+      return MODE_ICONS[st.hvac_mode] || null;
+    case "off":
+      return onlyLights(agenda) ? "mdi:lightbulb-off-outline" : "mdi:power-off";
+    case "on":
+      return onlyLights(agenda) ? "mdi:lightbulb-on-outline" : "mdi:power";
+    case "position":
+      return st.position > 0 ? "mdi:window-shutter-open" : "mdi:window-shutter";
+    case "option":
+      return NAMED_ICONS[optionKey(st.option)] || null;
+    default:
+      return null;
+  }
+}
+
+export const eventIcon = (agenda, event) =>
+  event.icon === AUTO_ICON ? autoIcon(agenda, event.state) : event.icon || null;
+
+/** Icon field of the event editor: Auto follows the state, otherwise the icon typed, if any. */
+export function iconPicker(box, ev, agenda, T) {
+  const auto = ev.icon === AUTO_ICON;
+  const shown = auto ? autoIcon(agenda, ev.state) : ev.icon;
+  box.innerHTML = `<button class="swatch auto ${auto ? "on" : ""}" data-icon-auto>${esc(T.auto)}</button>
+    <input class="inp" data-icon-input value="${esc(shown || "")}" ${auto ? "disabled" : ""}
+      placeholder="${esc(auto ? T.icon_none : "mdi:radiator")}">`;
+  box.querySelector("[data-icon-auto]").addEventListener("click", () => {
+    ev.icon = auto ? null : AUTO_ICON;
+    iconPicker(box, ev, agenda, T);
+    if (auto) box.querySelector("[data-icon-input]").focus();
+  });
+  box.querySelector("[data-icon-input]").addEventListener("input", (e) => (ev.icon = e.target.value));
 }
 
 /** min, max, step and unit of the first linked number. */
@@ -212,6 +303,12 @@ export function stateLabel(hass, agenda, st, T, withTemp = true) {
   if (!st) return "";
   const text = plainLabel(hass, agenda, followed(hass, st), T, withTemp);
   return st.source && SOURCE_FIELDS[st.type] && withTemp ? `${text} · ${friendlyName(hass, st.source)}` : text;
+}
+
+/** The label without the climate mode, "18°" for "Heat 18°", for a block too narrow; "" when it would not change. */
+export function shortStateLabel(hass, agenda, st, T) {
+  if (!st?.hvac_mode || !["temperature", "preset"].includes(st.type)) return "";
+  return plainLabel(hass, agenda, followed(hass, { ...st, hvac_mode: null }), T, false);
 }
 
 function plainLabel(hass, agenda, st, T, withTemp) {

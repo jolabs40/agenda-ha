@@ -79,6 +79,7 @@ export const TEXTS = {
     color: "Couleur",
     auto: "Auto",
     icon: "Icône",
+    icon_none: "Aucune pour cet état",
     start_actions: "Actions de début",
     end_actions: "Actions de fin",
     actions_hint: "Exécutées au début (ou à la fin) de chaque occurrence, comme dans une automatisation.",
@@ -114,6 +115,7 @@ export const TEXTS = {
     no_entity: "Aucun appareil de ce type.",
     search: "Rechercher",
     resync_on_start: "Recaler les appareils au démarrage de Home Assistant",
+    all_day_header: "Dans la semaine, les journées entières sous la date",
     resync_now: "Appliquer maintenant",
     delete_agenda: "Supprimer l'agenda",
     duplicate_agenda_hint:
@@ -289,7 +291,7 @@ export const TEXTS = {
     odd_weeks: "semaines impaires",
     conditions: "Conditions",
     conditions_hint:
-      "L'événement ne prend la main (état et actions de début) que si ses conditions sont remplies (toutes, ou au moins l'une). Ses actions de fin s'exécutent toujours.",
+      "L'événement ne prend la main (état et actions de début) que si ses conditions sont remplies (toutes, ou au moins l'une). Ses actions de fin ne s'exécutent que si elles l'étaient à son début.",
     cond_entity: "Entité",
     cond_is: "est",
     cond_is_not: "n'est pas",
@@ -394,6 +396,7 @@ export const TEXTS = {
     color: "Colour",
     auto: "Auto",
     icon: "Icon",
+    icon_none: "None for this state",
     start_actions: "Start actions",
     end_actions: "End actions",
     actions_hint: "Run at the start (or end) of each occurrence, as in an automation.",
@@ -429,6 +432,7 @@ export const TEXTS = {
     no_entity: "No device of this type.",
     search: "Search",
     resync_on_start: "Bring devices back to the agenda when Home Assistant starts",
+    all_day_header: "In the week, all-day events under the date",
     resync_now: "Apply now",
     delete_agenda: "Delete agenda",
     duplicate_agenda_hint:
@@ -586,7 +590,7 @@ export const TEXTS = {
     odd_weeks: "odd weeks",
     conditions: "Conditions",
     conditions_hint:
-      "The event takes charge (state and start actions) only while its conditions hold (all of them, or at least one). Its end actions always run.",
+      "The event takes charge (state and start actions) only while its conditions hold (all of them, or at least one). Its end actions run only if they held at its start.",
     cond_entity: "Entity",
     cond_is: "is",
     cond_is_not: "is not",
@@ -689,6 +693,7 @@ export const TEXTS = {
     color: "Farbe",
     auto: "Auto",
     icon: "Symbol",
+    icon_none: "Keins für diesen Zustand",
     start_actions: "Aktionen zu Beginn",
     end_actions: "Aktionen am Ende",
     actions_hint: "Werden zu Beginn (oder am Ende) jedes Termins ausgeführt, wie in einer Automatisierung.",
@@ -724,6 +729,7 @@ export const TEXTS = {
     no_entity: "Kein Gerät dieses Typs.",
     search: "Suchen",
     resync_on_start: "Geräte beim Start von Home Assistant auf die Agenda zurücksetzen",
+    all_day_header: "In der Woche ganztägige Termine unter dem Datum",
     resync_now: "Jetzt anwenden",
     delete_agenda: "Agenda löschen",
     duplicate_agenda_hint:
@@ -897,7 +903,7 @@ export const TEXTS = {
     odd_weeks: "ungerade Wochen",
     conditions: "Bedingungen",
     conditions_hint:
-      "Der Termin übernimmt (Zustand und Aktionen zu Beginn) nur, solange seine Bedingungen erfüllt sind (alle oder mindestens eine). Seine Aktionen am Ende laufen immer.",
+      "Der Termin übernimmt (Zustand und Aktionen zu Beginn) nur, solange seine Bedingungen erfüllt sind (alle oder mindestens eine). Seine Aktionen am Ende laufen nur, wenn sie zu Beginn erfüllt waren.",
     cond_entity: "Entität",
     cond_is: "ist",
     cond_is_not: "ist nicht",
@@ -1002,6 +1008,7 @@ export const TEXTS = {
     color: "Kleur",
     auto: "Auto",
     icon: "Pictogram",
+    icon_none: "Geen voor deze toestand",
     start_actions: "Acties bij het begin",
     end_actions: "Acties aan het einde",
     actions_hint: "Uitgevoerd aan het begin (of einde) van elke gebeurtenis, zoals in een automatisering.",
@@ -1037,6 +1044,7 @@ export const TEXTS = {
     no_entity: "Geen apparaat van dit type.",
     search: "Zoeken",
     resync_on_start: "Apparaten bij het starten van Home Assistant terugzetten op de agenda",
+    all_day_header: "In de week hele dagen onder de datum",
     resync_now: "Nu toepassen",
     delete_agenda: "Agenda verwijderen",
     duplicate_agenda_hint:
@@ -1210,7 +1218,7 @@ export const TEXTS = {
     odd_weeks: "oneven weken",
     conditions: "Voorwaarden",
     conditions_hint:
-      "De gebeurtenis neemt het over (toestand en acties bij het begin) alleen zolang haar voorwaarden kloppen (alle, of minstens één). Haar acties aan het einde lopen altijd.",
+      "De gebeurtenis neemt het over (toestand en acties bij het begin) alleen zolang haar voorwaarden kloppen (alle, of minstens één). Haar acties aan het einde lopen alleen als ze bij het begin klopten.",
     cond_entity: "Entiteit",
     cond_is: "is",
     cond_is_not: "is niet",

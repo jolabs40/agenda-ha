@@ -13,6 +13,7 @@ const {
   areaName,
   loadHaComponents,
   monthlyLabel,
+  SWATCHES,
   wall,
   wallDate,
   wallTime,
@@ -27,21 +28,6 @@ const addMinutes = (hhmm, minutes) => wallTime(wm(`2000-01-01T${hhmm}`) + minute
 const minutesOf = (hhmm) => wm(`2000-01-01T${hhmm}`) - wm("2000-01-01T00:00");
 const kinds = await import(`./agenda-kinds.js${V}`);
 const { PREHEAT_STYLES, outdoorOptions, preheatSection, preheatSettings } = await import(`./agenda-preheat.js${V}`);
-
-const SWATCHES = [
-  "#ef6c00",
-  "#e53935",
-  "#d81b60",
-  "#8e24aa",
-  "#3949ab",
-  "#1e88e5",
-  "#00897b",
-  "#43a047",
-  "#c0ca33",
-  "#fdd835",
-  "#6d4c41",
-  "#546e7a",
-];
 
 class Dialog {
   constructor(host, { title, wide = false }) {
@@ -416,7 +402,7 @@ export function eventEditor(host, opts) {
     <details class="more"><summary>${esc(T.look)}</summary>
       <div class="look">
         <div class="fld"><span>${esc(T.color)}</span><div class="swatches" data-swatches></div></div>
-        <label class="fld"><span>${esc(T.icon)}</span><input class="inp" data-f="icon" value="${esc(ev.icon || "")}" placeholder="mdi:radiator"></label>
+        <div class="fld"><span>${esc(T.icon)}</span><div class="swatches" data-icon></div></div>
       </div>
     </details>
     ${
@@ -451,6 +437,7 @@ export function eventEditor(host, opts) {
   const sections = {
     state() {
       const sec = dlg.$('[data-sec="state"]');
+      sections.icon();
       if (!kinds.hasStates(agenda)) {
         sec.innerHTML = "";
         return;
@@ -792,6 +779,7 @@ export function eventEditor(host, opts) {
         sections.conditions();
       });
     },
+    icon: () => kinds.iconPicker(dlg.$("[data-icon]"), ev, agenda, T),
     swatches() {
       const box = dlg.$("[data-swatches]");
       const auto = !ev.color;
@@ -1114,6 +1102,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
 
   const body = `<label class="fld"><span>${esc(T.name)}</span><input class="inp" data-name value="${esc(name)}"></label>
     <div class="fld"><span>${esc(T.color)}</span><div class="swatches" data-swatches></div></div>
+    <label class="tgl"><input type="checkbox" data-allday-head ${cfg.all_day_header ? "checked" : ""}><span></span>${esc(T.all_day_header)}</label>
     <section data-sec="kind"></section>
     <section data-sec="entities"></section>
     <section data-sec="default"></section>
@@ -1297,6 +1286,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
 
   dlg.$("[data-name]").addEventListener("input", (x) => (name = x.target.value));
   dlg.$("[data-resync]").addEventListener("change", (x) => (cfg.resync_on_start = x.target.checked));
+  dlg.$("[data-allday-head]").addEventListener("change", (x) => (cfg.all_day_header = x.target.checked));
   dlg.$("[data-manual]").addEventListener("change", (x) => (cfg.manual_hold = x.target.value));
 
   const save = async () => {
@@ -1315,6 +1305,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
         presence_jitter: cfg.kind === "none" || cfg.follow_absence ? 0 : Number(cfg.presence_jitter) || 0,
         follow_absence: !!cfg.follow_absence,
         away_state: cfg.kind === "none" ? null : (cfg.away_state ?? null),
+        all_day_header: !!cfg.all_day_header,
         ...preheatSettings(cfg),
       },
     });
@@ -1464,6 +1455,7 @@ export const DIALOG_STYLES = `
   .swatch.on { border-color: var(--primary-text-color); box-shadow: 0 0 0 2px var(--card-background-color) inset; }
   .swatch.auto { width: auto; padding: 0 10px; background: var(--agenda-hover); color: var(--primary-text-color); font: inherit; font-size: 12px; border-radius: 99px; }
   .swatch-input { width: 32px; height: 32px; border: none; background: none; padding: 0; cursor: pointer; }
+  .swatches input.inp { flex: 1 1 0; width: auto; min-width: 0; }
   .tgl { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; }
   .tgl input { display: none; }
   .tgl span { width: 36px; height: 20px; border-radius: 99px; background: var(--divider-color); position: relative; transition: background .15s; flex: none; }

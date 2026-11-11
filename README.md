@@ -43,6 +43,8 @@ agenda goes back to its default state.
   same column and show hatched in the week, month and house views, for information only.
 - An event can last several days, from one date and time to another, repeated or not. Its
   exceptions look at the day it starts.
+- An agenda can keep its all-day events under the date in the week, rather than as a block down
+  the whole column: handy for name days and birthdays.
 - Events repeat every N days, weeks (on chosen weekdays, or on even or odd weeks only) or months
   (on the same date, on the 2nd Monday, on the last Friday...), optionally until a date. Single
   days can be removed from or added to a series.
@@ -106,6 +108,12 @@ What an agenda can control:
 
 Thermostats that publish their preset temperatures (Versatile Thermostat does) show them next
 to the preset names.
+
+Selector options that name a heating level, as on a pilot wire (Comfort, Comfort -1, Comfort -2,
+Eco, Frost, Off, also in French, German or Dutch), take the color of the preset of the same name:
+Comfort in orange, Eco in light blue, Frost in blue grey. An event's icon can be left on Auto: it
+then follows the state, a sun for Comfort, a moon for Eco, a snowflake for Frost, a flame for an air
+conditioner set to heat.
 
 | House view | Event editor | Phone |
 |---|---|---|
@@ -253,7 +261,8 @@ Conditions compare the state of an entity: `person.alex` is `home`, `binary_sens
 `on`, `sensor.outdoor_temperature` is below `5`. With several conditions, the event needs all of
 them or at least one of them. They are read when the event starts and whenever the entity changes.
 An event whose conditions stop holding hands over to the next event in charge, or to the default
-state; its end actions still run. An entity that becomes unavailable keeps its last state for ten
+state; its end actions still run. One whose conditions did not hold at its start runs neither its
+start nor its end actions. An entity that becomes unavailable keeps its last state for ten
 minutes, restarts included, so a sensor that drops out briefly changes nothing.
 
 The week draws an event whose conditions do not hold right now faded and struck through, as it
