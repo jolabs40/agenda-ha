@@ -61,7 +61,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 - Une consigne ou une valeur peut suivre une entité, un `input_number` ou un capteur modèle par
   exemple : on la change, et chaque événement qui la suit change avec elle. La valeur de
   l'événement reste en secours tant que l'entité n'en a pas.
-- Les jours fériés du pays peuvent être sautés, ou être les seuls jours retenus.
+- Les jours fériés du pays peuvent être sautés, ou être les seuls jours retenus. Un capteur binaire
+  dit aux automatisations si aujourd'hui en est un.
 - Des calendriers peuvent servir de condition : sauter les jours où ils ont un événement
   (déplacements, absences), ne garder que ceux-là, ou les deux sur le même événement. Avec plusieurs
   calendriers, un événement dans l'un d'eux suffit, ou il en faut un dans chacun.
@@ -390,6 +391,11 @@ Dans les exceptions d'un événement, Jours fériés figure aussi en tête des l
 Le réglage Jours fériés restreint toujours les jours, alors qu'une liste combine ses calendriers :
 avec Télétravail et Jours fériés sous Seulement les jours avec un événement (dans au moins l'un
 d'eux, le choix par défaut), l'événement tourne les jours de télétravail comme les jours fériés.
+
+Pour les automatisations, le capteur binaire `binary_sensor.agenda_public_holiday` est allumé les
+jours fériés. Ses attributs donnent le nom du jour férié (`holiday`), si le lendemain en est un
+(`tomorrow`) et le prochain (`next_date`, `next_holiday`). Il suit le même pays et la même région
+que les agendas.
 
 ## Vacances scolaires
 

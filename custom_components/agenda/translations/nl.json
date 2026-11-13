@@ -25,6 +25,25 @@
         "name": "Afwezigheidsmodus"
       }
     },
+    "binary_sensor": {
+      "public_holiday": {
+        "name": "Feestdag",
+        "state_attributes": {
+          "holiday": {
+            "name": "Vandaag"
+          },
+          "tomorrow": {
+            "name": "Morgen"
+          },
+          "next_date": {
+            "name": "Volgende datum"
+          },
+          "next_holiday": {
+            "name": "Volgende feestdag"
+          }
+        }
+      }
+    },
     "sensor": {
       "current": {
         "name": "Nu"

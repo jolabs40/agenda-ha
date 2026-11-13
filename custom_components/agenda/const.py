@@ -18,7 +18,7 @@ STATIC_URL = "/agenda_static"
 PANEL_URL = "agenda"
 PANEL_ELEMENT = "agenda-panel"
 
-PLATFORMS = ["calendar", "switch", "sensor"]
+PLATFORMS = ["calendar", "switch", "sensor", "binary_sensor"]
 
 # sent with the entry id whenever an agenda changes
 SIGNAL_UPDATED = f"{DOMAIN}_updated"
@@ -77,6 +77,9 @@ UNDO_WINDOW_S = 600
 
 # a device back after being unavailable settles before it gets its state
 AVAILABLE_DELAY_S = 10
+# a device still unavailable this long after its state was due is logged: many are only
+# starting up, a while after Home Assistant
+UNAVAILABLE_WARN_S = 300
 # delay before checking that a device shows the state it was sent; a moving cover is
 # checked again, this many times at most
 CHECK_DELAY_S = 15

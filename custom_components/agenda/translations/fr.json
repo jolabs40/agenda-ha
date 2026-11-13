@@ -25,6 +25,25 @@
         "name": "Mode absence"
       }
     },
+    "binary_sensor": {
+      "public_holiday": {
+        "name": "Jour férié",
+        "state_attributes": {
+          "holiday": {
+            "name": "Aujourd'hui"
+          },
+          "tomorrow": {
+            "name": "Demain"
+          },
+          "next_date": {
+            "name": "Prochaine date"
+          },
+          "next_holiday": {
+            "name": "Prochain jour férié"
+          }
+        }
+      }
+    },
     "sensor": {
       "current": {
         "name": "En ce moment"

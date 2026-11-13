@@ -81,6 +81,7 @@ class Shared:
         self.allow_users = False  # non-admin users may edit events
         self._sun_cache: dict[tuple[date, str], datetime | None] = {}
         self._absence_listeners: list[Callable[[], Any]] = []
+        self._holiday_listeners: list[Callable[[], None]] = []
         self._unsub_absence: Callable[[], None] | None = None
 
     @property
@@ -104,10 +105,12 @@ class Shared:
         country = self.effective_country
         if not country:
             self._holidays = None
-            return
-        self._holidays = await self.hass.async_add_executor_job(
-            _build_holidays, country, self.subdiv, self.hass.config.language
-        )
+        else:
+            self._holidays = await self.hass.async_add_executor_job(
+                _build_holidays, country, self.subdiv, self.hass.config.language
+            )
+        for listener in list(self._holiday_listeners):
+            listener()
 
     async def _async_save(self) -> None:
         await self._store.async_save(
@@ -218,6 +221,24 @@ class Shared:
 
     def is_holiday(self, day: date) -> bool:
         return self._holidays is not None and day in self._holidays
+
+    def holiday_name(self, day: date) -> str | None:
+        return self._holidays.get(day) if self._holidays is not None else None
+
+    def next_holiday(self, after: date) -> tuple[date, str] | None:
+        """The first public holiday after a day, within a year."""
+        if self._holidays is None:
+            return None
+        for offset in range(1, 367):
+            day = after + timedelta(days=offset)
+            if name := self._holidays.get(day):
+                return day, name
+        return None
+
+    @callback
+    def async_on_holidays_change(self, listener: Callable[[], None]) -> Callable[[], None]:
+        self._holiday_listeners.append(listener)
+        return lambda: self._holiday_listeners.remove(listener)
 
     def between(self, start: date, end: date) -> dict[str, str]:
         """Holiday names by ISO date over [start, end)."""

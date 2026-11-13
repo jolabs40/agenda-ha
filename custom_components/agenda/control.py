@@ -36,6 +36,7 @@ from .const import (
     EVENT_APPLIED,
     EVENT_FAILED,
     RADIO_GAP_S,
+    UNAVAILABLE_WARN_S,
     UNDO_DELAY_S,
     UNDO_MAX,
     UNDO_WINDOW_S,
@@ -105,6 +106,8 @@ class Control:
         # when each device changed by hand was last put back (setting undo)
         self._undone: dict[str, list[float]] = {}
         self._timers: dict[str, Callable[[], None]] = {}
+        # warnings pending for devices unavailable when their state was due
+        self._away: dict[str, Callable[[], None]] = {}
         self._unsub: Callable[[], None] | None = None
         self.journal: deque[dict[str, Any]] = deque(maxlen=JOURNAL_SIZE)
 
@@ -126,7 +129,7 @@ class Control:
     @callback
     def track(self) -> None:
         """Follow the linked devices; forget those no longer linked."""
-        self.stop()
+        self._unfollow()
         linked = set(self.agenda.linked)
         for entity_id in set(self.applied) | self.waiting | self.touched:
             if entity_id not in linked:
@@ -145,12 +148,39 @@ class Control:
 
     @callback
     def stop(self) -> None:
+        self._unfollow()
+        for cancel in self._away.values():
+            cancel()
+        self._away.clear()
+
+    @callback
+    def _unfollow(self) -> None:
         if self._unsub:
             self._unsub()
             self._unsub = None
         for cancel in self._timers.values():
             cancel()
         self._timers.clear()
+
+    @callback
+    def _warn_if_away(self, entity_id: str) -> None:
+        """Log a device only if it stays unavailable: at startup, many come up late."""
+        if cancel := self._away.pop(entity_id, None):
+            cancel()
+
+        @callback
+        def _warn(_now: datetime) -> None:
+            self._away.pop(entity_id, None)
+            state = self.hass.states.get(entity_id)
+            if entity_id in self.waiting and (state is None or devices.unavailable(state.state, state.attributes)):
+                _LOGGER.warning(
+                    "Agenda %s: %s has been unavailable for %d minutes, it will get its state when it is back",
+                    self.agenda.name,
+                    entity_id,
+                    UNAVAILABLE_WARN_S // 60,
+                )
+
+        self._away[entity_id] = async_call_later(self.hass, UNAVAILABLE_WARN_S, _warn)
 
     @callback
     def assume(self, wanted: dict[str, Any] | None) -> None:
@@ -225,9 +255,10 @@ class Control:
         if state is None or devices.unavailable(state.state, state.attributes):
             self.note(entity_id, "unavailable", reason=reason, wanted=copy.deepcopy(wanted))
             if entity_id not in self.waiting:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "Agenda %s: %s is not available, it will get its state when it is back", agenda.name, entity_id
                 )
+                self._warn_if_away(entity_id)
             self.waiting.add(entity_id)
             if cancel := self._timers.pop(entity_id, None):
                 cancel()

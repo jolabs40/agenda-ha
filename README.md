@@ -55,7 +55,8 @@ agenda goes back to its default state.
 - A setpoint or a value can follow an entity, an `input_number` or a template sensor for instance:
   change it, and every event that follows it changes with it. The event's own value stays for when
   the entity has none.
-- Public holidays of your country can be skipped, or used as the only days.
+- Public holidays of your country can be skipped, or used as the only days. A binary sensor tells
+  automations whether today is one.
 - Calendars can act as conditions: skip the days with an event in them (trips, absences), keep
   only those days, or both on the same event. With several calendars, an event in one of them is
   enough, or one is needed in each of them.
@@ -366,6 +367,11 @@ In the exceptions of an event, Public holidays also comes first in the calendar 
 holidays setting always narrows the days down, whereas a list combines its calendars: with Home
 office and Public holidays under Only on days with an event (in at least one of them, the default),
 the event runs on home office days and on public holidays alike.
+
+For automations, the binary sensor `binary_sensor.agenda_public_holiday` is on during a public
+holiday. Its attributes give the name of today's holiday (`holiday`), whether tomorrow is one
+(`tomorrow`), and the next one (`next_date`, `next_holiday`). It follows the same country and
+region as the agendas.
 
 ## School holidays
 

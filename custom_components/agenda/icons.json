@@ -1,5 +1,13 @@
 {
   "entity": {
+    "binary_sensor": {
+      "public_holiday": {
+        "default": "mdi:calendar-blank-outline",
+        "state": {
+          "on": "mdi:calendar-star"
+        }
+      }
+    },
     "sensor": {
       "heating_rate": {
         "default": "mdi:thermometer-chevron-up"
