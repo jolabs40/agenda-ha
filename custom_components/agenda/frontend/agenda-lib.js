@@ -41,11 +41,13 @@ export function areaName(hass, entityId) {
   }
 }
 
-// in a list of condition calendars, the public holidays
+// in a list of condition calendars, the public holidays and the weekend
 export const HOLIDAYS = "holidays";
+export const WEEKEND = "weekend";
+export const DAY_CALENDARS = [HOLIDAYS, WEEKEND];
 
 export function calendarName(hass, id, T) {
-  return id === HOLIDAYS ? T.holidays : friendlyName(hass, id);
+  return { [HOLIDAYS]: T.holidays, [WEEKEND]: T.weekend_days }[id] ?? friendlyName(hass, id);
 }
 
 export const DAY = 1440;
@@ -313,6 +315,28 @@ export function effectiveTimeline(agenda, occs, from, to, withState) {
   return out;
 }
 
+/** The group of an agenda, "" when it has none. */
+export const groupOf = (agenda) => agenda.settings?.group || "";
+
+/** The agendas without a group first, then each group by name, keeping the order within. */
+export const byGroup = (agendas) =>
+  [...agendas].sort((a, b) => !!groupOf(a) - !!groupOf(b) || groupOf(a).localeCompare(groupOf(b)));
+
+export const groupsOf = (agendas) =>
+  [...new Set(agendas.map(groupOf).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+/** One row per agenda, with a title before each group when they are not all in the same one. */
+export function groupedRows(agendas, row, title) {
+  const titled = title && new Set(agendas.map(groupOf)).size > 1;
+  return agendas
+    .map((a, i) => {
+      const group = groupOf(a);
+      const head = titled && group && (i === 0 || groupOf(agendas[i - 1]) !== group) ? title(group) : "";
+      return head + row(a);
+    })
+    .join("");
+}
+
 export function repeatSummary(event, T, hass) {
   const r = event.repeat || {};
   const lang = T._lang;
@@ -335,7 +359,9 @@ export function repeatSummary(event, T, hass) {
     }
     case "monthly": {
       const what = monthlyLabel(start, r.monthly, T);
-      text = n === 1 ? T.every_month_on(what) : T.every_n_months_on(n, what);
+      const month = () => fmtDay(start, lang, { month: "long" });
+      if (isYearly(r)) text = n === 12 ? T.every_year_on(month(), what) : T.every_n_years_on(n / 12, month(), what);
+      else text = n === 1 ? T.every_month_on(what) : T.every_n_months_on(n, what);
       break;
     }
     default:
@@ -365,6 +391,21 @@ export function repeatSummary(event, T, hass) {
   if (nx) extra.push(T.n_exceptions(nx));
   if (event.conditions?.length) extra.push(T.n_conditions(event.conditions.length));
   return [text, ...extra].join(" · ");
+}
+
+/** Every 12 months, or a multiple: the editor offers it as a yearly repetition, stored as monthly. */
+export const isYearly = (r) => r.freq === "monthly" && (r.interval || 1) % 12 === 0;
+
+/** A field of the repetition set from the editor, where years are counted in steps of 12 months. */
+export function setRepeat(r, key, value) {
+  const yearly = isYearly(r);
+  if (key === "interval") {
+    const n = Math.max(1, Number(value) || 1);
+    r.interval = yearly ? 12 * Math.min(n, 30) : n;
+  } else if (key === "freq") {
+    Object.assign(r, value === "yearly" ? { freq: "monthly", interval: 12 } : { freq: value });
+    if (yearly && value !== "yearly") r.interval = 1;
+  } else r[key] = value || (key === "until" ? null : value);
 }
 
 /** "le 12", "le 2e lundi", "le dernier vendredi", for a monthly repetition starting on `start`. */

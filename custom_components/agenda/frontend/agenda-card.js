@@ -6,6 +6,7 @@
 //   view: house            # or week, or next
 //   agenda: Bedroom        # week view: name of the agenda
 //   agendas: [Bedroom]     # house and next views: only these agendas, in this order (optional)
+//   group: Heating         # house and next views: only the agendas of this group (optional)
 //   names: {Bedroom: Bed}  # a shorter name in the card (optional)
 //   title: Heating         # optional, "" for none
 //   icon: mdi:radiator     # optional
@@ -140,8 +141,9 @@ class AgendaCard extends HTMLElement {
       return name ? { ...a, name: String(name) } : a;
     };
     if (this._config.view !== "week") {
-      const only = this._config.agendas;
-      if (!only) return all.map(named);
+      const { agendas: only, group } = this._config;
+      if (group) return all.filter((a) => lib.groupOf(a) === group).map(named);
+      if (!only) return lib.byGroup(all).map(named);
       const list = [].concat(only).map(find).filter(Boolean);
       return list.filter((a, i) => list.indexOf(a) === i).map(named);
     }
@@ -210,6 +212,8 @@ class AgendaCard extends HTMLElement {
         hass: this._hass,
         T,
         agendas: this._agendas(),
+        // the titles of the groups, unless the agendas are listed in an order of their own
+        titles: !this._config.agendas,
         allAgendas: this._data.agendas,
         occ: this._occ || {},
         skipped: this._skipped || {},
@@ -382,8 +386,10 @@ class AgendaCardEditor extends HTMLElement {
     try {
       const data = await this._hass.callWS({ type: "agenda/list" });
       this._names = data.agendas.map((a) => a.name);
+      this._groupOf = Object.fromEntries(data.agendas.map((a) => [a.name, lib.groupOf(a)]));
     } catch (_err) {
       this._names = [];
+      this._groupOf = {};
     }
     await loadHaComponents();
     await Promise.race([customElements.whenDefined("ha-form"), new Promise((r) => setTimeout(r, 5000))]);
@@ -408,7 +414,14 @@ class AgendaCardEditor extends HTMLElement {
     ].map(([value, label]) => ({ value, label }));
     const number = (min, max) => ({ number: { min, max, mode: "box" } });
     // one field per agenda shown, labelled with its own name
-    this._shown = view === "week" ? [c.agenda || this._names[0]].filter(Boolean) : [].concat(c.agendas || this._names);
+    const groups = [...new Set(Object.values(this._groupOf).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const inGroup = this._names.filter((name) => this._groupOf[name] === c.group);
+    this._shown =
+      view === "week"
+        ? [c.agenda || this._names[0]].filter(Boolean)
+        : c.group
+          ? inGroup
+          : [].concat(c.agendas || this._names);
     this._nameFields = this._shown.map((name) => ({ name, selector: { text: {} } }));
     const display = {
       house: [
@@ -428,9 +441,24 @@ class AgendaCardEditor extends HTMLElement {
     this._form.hass = this._hass;
     this._form.schema = [
       { name: "view", selector: { select: { mode: "dropdown", options: views } } },
+      ...(view !== "week" && groups.length
+        ? [
+            {
+              name: "group",
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  options: ["", ...groups].map((g) => ({ value: g, label: g || T.group_none })),
+                },
+              },
+            },
+          ]
+        : []),
       view === "week"
         ? { name: "agenda", selector: { select: { mode: "dropdown", options } } }
-        : { name: "agendas", selector: { select: { multiple: true, reorder: true, options } } },
+        : c.group
+          ? null
+          : { name: "agendas", selector: { select: { multiple: true, reorder: true, options } } },
       { name: "title", selector: { text: {} } },
       { name: "icon", selector: { icon: {} } },
       { name: "absence", selector: { boolean: {} } },
@@ -439,11 +467,12 @@ class AgendaCardEditor extends HTMLElement {
         : []),
       { type: "expandable", name: "", title: T.card_display, icon: "mdi:tune-variant", schema: display },
       { name: "tap_action", selector: { ui_action: {} } },
-    ];
+    ].filter(Boolean);
     const labels = {
       view: T.card_view,
       agenda: T.agenda,
       agendas: T.card_agendas,
+      group: T.card_group,
       title: T.card_title,
       icon: T.card_icon,
       absence: T.card_absence,
@@ -488,10 +517,12 @@ class AgendaCardEditor extends HTMLElement {
     // shown unless turned off: only false is written
     for (const key of ["absence", "live", "curve", "buttons"]) if (config[key] !== false) delete config[key];
     const only = {
-      house: ["agendas", "start_hour", "end_hour", "name_width", "row_height", "live", "curve"],
+      house: ["agendas", "group", "start_hour", "end_hour", "name_width", "row_height", "live", "curve"],
       week: ["agenda", "days", "hour_height"],
-      next: ["agendas", "buttons"],
+      next: ["agendas", "group", "buttons"],
     };
+    // a group takes the place of a list of agendas
+    if (config.group) delete config.agendas;
     const view = config.view || "house";
     const others = new Set(Object.values(only).flat());
     for (const key of only[view]) others.delete(key);

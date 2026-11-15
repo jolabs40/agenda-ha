@@ -37,6 +37,11 @@ agenda goes back to its default state.
   chips at the top do the same. The Add event button sits at the bottom right. The panel opens on
   the last tab picked, browser by browser, and the gear on the All row leads to the shared settings.
   The edge of the column can be dragged to make it wider, which each browser remembers too.
+- Groups sort the agendas: a name in the Group field of an agenda's settings, and the column files
+  it under that title, after the agendas without a group. The line of a group folds it, ticks or
+  unticks all its agendas, shows it alone with a click on its name, and its pencil renames it for
+  all its agendas at once. The House and List views use the same titles; on a phone, a chip per
+  group shows it alone.
 - Duplicate, in the settings of an agenda, makes a copy of it: same settings, same events, without
   the devices, to pick next.
 - Other calendars of Home Assistant (school holidays, a family calendar...) can be ticked in the
@@ -45,9 +50,9 @@ agenda goes back to its default state.
   exceptions look at the day it starts.
 - An agenda can keep its all-day events under the date in the week, rather than as a block down
   the whole column: handy for name days and birthdays.
-- Events repeat every N days, weeks (on chosen weekdays, or on even or odd weeks only) or months
-  (on the same date, on the 2nd Monday, on the last Friday...), optionally until a date. Single
-  days can be removed from or added to a series.
+- Events repeat every N days, weeks (on chosen weekdays, or on even or odd weeks only), months
+  (on the same date, on the 2nd Monday, on the last Friday...) or years (a birthday, Father's
+  Day), optionally until a date. Single days can be removed from or added to a series.
 - The start or the end of an event can follow sunrise or sunset, with an offset, not before or at
   the latest at a given time.
 - Conditions on entities: an event takes charge only while, for instance, someone is home, a
@@ -61,7 +66,8 @@ agenda goes back to its default state.
   only those days, or both on the same event. With several calendars, an event in one of them is
   enough, or one is needed in each of them.
   Public holidays can be one of these calendars, for an event that runs on home office days or on
-  public holidays. A calendar can also count only its events containing a text, such as the red
+  public holidays, and so can Weekend: a single event then covers the weekend, public holidays and
+  days off. A calendar can also count only its events containing a text, such as the red
   days of an electricity tariff calendar.
   An event's own agenda can be one of them too: a repeated Friday gives way to a week of leave set
   in the same agenda. Only the events that do not depend on it count then.
@@ -76,6 +82,9 @@ agenda goes back to its default state.
 - Each device is followed up. One that is unavailable gets its state when it comes back; one that
   does not take its state gets a second try, then a Repairs issue. Devices without state feedback
   (radio covers) get their command once, one after the other with a short pause.
+- An entity renamed in Home Assistant is followed wherever the agenda uses it: devices,
+  conditions, followed value, calendars, shared settings. A device that no longer exists shows as
+  not found in the agenda's settings, to be unchecked there.
 - Air conditioners: an event can set the mode, fan speed and swing with the temperature, or a mode
   alone (fan only, dry).
 - An absence mode for the whole house: the agendas that follow it keep their away state until a
@@ -171,6 +180,10 @@ A device set by hand, on itself or in Home Assistant, is recognised as such. Cha
 A restart keeps these changes, and so does `agenda.resync`. Apply now in the settings takes every
 device back. The column shows "set by hand until...", and the Now sensor lists these devices in its
 `set_by_hand` attribute.
+
+A thermostat switched off by hand, to air a room for instance, and then switched on again takes the
+agenda's state at once: 17 if the agenda went from 19 to 17 meanwhile. Unless it is given another
+setpoint as it is switched on, or the agenda wants it off: it then stays set by hand.
 
 A thermostat that stops by itself is not changed by hand: Versatile Thermostat turns itself off
 for an open window, its auto start and stop or its central mode, and keeps what it was asked. The
@@ -368,6 +381,10 @@ holidays setting always narrows the days down, whereas a list combines its calen
 office and Public holidays under Only on days with an event (in at least one of them, the default),
 the event runs on home office days and on public holidays alike.
 
+Weekend comes next in these lists. It holds the weekend days of the same country: Saturday and
+Sunday in most of them, Friday and Saturday in some. Under Only on days with an event, with Weekend,
+Public holidays and a calendar of days off, an event repeated every day runs on all the days at home.
+
 For automations, the binary sensor `binary_sensor.agenda_public_holiday` is on during a public
 holiday. Its attributes give the name of today's holiday (`holiday`), whether tomorrow is one
 (`tomorrow`), and the next one (`next_date`, `next_holiday`). It follows the same country and
@@ -412,7 +429,8 @@ Every option is optional:
 
 | Option | View | Effect |
 |---|---|---|
-| `agendas` | house, next | the agendas shown, in this order; all of them by name otherwise |
+| `agendas` | house, next | the agendas shown, in this order; all of them by group then by name otherwise |
+| `group` | house, next | only the agendas of this group, in place of `agendas` |
 | `names` | all | another name in the card, for example `names: {Water heater couple: Couple}` |
 | `title`, `icon` | all | the header; `title: ""` leaves it out |
 | `absence: false` | all | no absence button nor banner |

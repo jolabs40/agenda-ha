@@ -7,6 +7,7 @@ const kinds = await import(`./agenda-kinds.js${V}`);
 const views = await import(`./agenda-views.js${V}`);
 const dialogs = await import(`./agenda-dialogs.js${V}`);
 const { preheatNote } = await import(`./agenda-preheat.js${V}`);
+const groups = await import(`./agenda-groups.js${V}`);
 
 const {
   DAY,
@@ -61,6 +62,9 @@ class AgendaPanel extends HTMLElement {
     // agendas left out of the views; older preferences name the single agenda shown instead
     this._hidden = new Set(Array.isArray(prefs.hidden) ? prefs.hidden : []);
     this._only = Array.isArray(prefs.hidden) ? null : prefs.selected;
+    // groups folded in the column, and the one being renamed there
+    this._folded = new Set(Array.isArray(prefs.folded) ? prefs.folded : []);
+    this._renaming = null;
     // calendars that are not agendas, shown for information, and their events
     this._cals = new Set(Array.isArray(prefs.calendars) ? prefs.calendars : []);
     this._ext = {};
@@ -143,7 +147,7 @@ class AgendaPanel extends HTMLElement {
   }
 
   async _init() {
-    this.shadowRoot.innerHTML = `<style>${views.VIEW_STYLES}${dialogs.DIALOG_STYLES}${STYLES}</style>
+    this.shadowRoot.innerHTML = `<style>${views.VIEW_STYLES}${dialogs.DIALOG_STYLES}${STYLES}${groups.GROUP_STYLES}</style>
       <div class="top">
         <button class="ic" data-menu ${this._narrow ? "" : "hidden"}><ha-icon icon="mdi:menu"></ha-icon></button>
         <ha-icon class="logo" icon="mdi:calendar-month"></ha-icon>
@@ -196,6 +200,7 @@ class AgendaPanel extends HTMLElement {
         `<div class="empty"><p>${esc(this.T.error)} : ${esc(err.message || err)}</p></div>`;
       return;
     }
+    this._data.agendas = lib.byGroup(this._data.agendas);
     const ids = this._data.agendas.map((a) => a.entry_id);
     if (this._only) {
       // a new agenda, or older preferences: that agenda alone ("all" names none)
@@ -297,7 +302,8 @@ class AgendaPanel extends HTMLElement {
   }
 
   _savePrefs() {
-    savePrefs({ view: this._opening, hidden: [...this._hidden], calendars: [...this._cals], side: this._sideW });
+    const [hidden, calendars, folded] = [[...this._hidden], [...this._cals], [...this._folded]];
+    savePrefs({ view: this._opening, hidden, calendars, side: this._sideW, folded });
   }
 
   /** Calendars of Home Assistant that are not agendas: shown for information, never used. */
@@ -418,12 +424,11 @@ class AgendaPanel extends HTMLElement {
     const shown = this._shown().length;
     const box = (state, color, text) =>
       `<span class="cb ${state}" style="--c:${esc(color)};--t:${esc(text)}">${state === "on" ? `<ha-icon icon="mdi:check"></ha-icon>` : ""}</span>`;
-    const rows = agendas
-      .map((a) => {
-        const on = !this._hidden.has(a.entry_id);
-        const color = a.settings.color;
-        const alone = on && shown === 1;
-        return `<div class="sa ${on ? "" : "off"} ${a.enabled ? "" : "paused"}">
+    const row = (a) => {
+      const on = !this._hidden.has(a.entry_id);
+      const color = a.settings.color;
+      const alone = on && shown === 1;
+      return `<div class="sa ${on ? "" : "off"} ${a.enabled ? "" : "paused"} ${lib.groupOf(a) ? "in" : ""}">
           <button class="cb-btn" data-check="${esc(a.entry_id)}" role="checkbox" aria-checked="${on}" aria-label="${esc(a.name)}">${box(on ? "on" : "", color, textColor(color))}</button>
           <ha-icon class="sa-kind" icon="${esc(kinds.kindIcon(a))}" title="${esc(T.kinds[kinds.kindOf(a)] || "")}"></ha-icon>
           <button class="sa-name" data-solo="${esc(a.entry_id)}" title="${esc(`${a.name}\n${alone ? T.show_all : T.show_only}`)}"><b>${esc(a.name)}</b><small>${esc(this._summary(a))}</small></button>
@@ -432,8 +437,8 @@ class AgendaPanel extends HTMLElement {
           <label class="tgl sm" title="${esc(a.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(a.entry_id)}" ${a.enabled ? "checked" : ""}><span></span></label>
           ${this._isAdmin() ? `<button class="ic sm cog" data-settings="${esc(a.entry_id)}" title="${esc(T.settings)}"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>`;
-      })
-      .join("");
+    };
+    const rows = groups.columnRows(this, row, box);
     const state = shown === agendas.length ? "on" : shown ? "some" : "";
     const all =
       agendas.length > 1
@@ -454,9 +459,11 @@ class AgendaPanel extends HTMLElement {
           })
           .join("")}`
       : "";
+    const typed = groups.typedName(this, side);
     side.innerHTML = `${all}${rows}
       ${this._isAdmin() ? `<button class="side-add" data-new-agenda><ha-icon icon="mdi:calendar-plus"></ha-icon>${esc(T.new_agenda)}</button>` : ""}
       ${ext}`;
+    groups.editName(this, side, typed);
   }
 
   _renderAway() {
@@ -543,7 +550,7 @@ class AgendaPanel extends HTMLElement {
       ? `<button class="btn tonal" data-new-agenda title="${esc(T.new_agenda)}"><ha-icon icon="mdi:calendar-plus"></ha-icon>${esc(T.agenda)}</button>`
       : "";
     const sel = this._single();
-    bar.innerHTML = `<div class="ags">${allChip}${chips}${xChip}${adds ? `<span class="adds">${adds}</span>` : ""}</div>
+    bar.innerHTML = `<div class="ags">${allChip}${groups.groupChips(this, all)}${chips}${xChip}${adds ? `<span class="adds">${adds}</span>` : ""}</div>
       ${
         sel
           ? `<div class="acts"><label class="tgl" title="${esc(sel.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(sel.entry_id)}" ${sel.enabled ? "checked" : ""}><span></span>${esc(sel.enabled ? T.active : T.paused)}</label>
@@ -768,6 +775,8 @@ class AgendaPanel extends HTMLElement {
       this._setView(el.dataset.view);
     } else if ((el = hit("[data-nav]"))) {
       this._navigate(Number(el.dataset.nav));
+    } else if (groups.groupClick(this, hit)) {
+      // the line or the chip of a group
     } else if (hit("[data-check-all]")) {
       const all = this._data.agendas.map((a) => a.entry_id);
       this._show(this._shown().length === all.length ? [] : all);
@@ -967,6 +976,7 @@ class AgendaPanel extends HTMLElement {
         ws: (m) => this.ws(m),
         callApi: (method, path, body) => this._hass.callApi(method, path, body),
         duplicate: (close) => this._duplicate(agenda, close),
+        groups: lib.groupsOf(this._data.agendas),
       }),
     );
   }

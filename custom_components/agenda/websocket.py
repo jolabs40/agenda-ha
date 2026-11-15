@@ -100,7 +100,7 @@ def _drop_empty_except(repeat: dict[str, Any]) -> dict[str, Any]:
     texts = {
         calendar: text.strip()
         for calendar, text in (repeat.get("calendar_texts") or {}).items()
-        if calendar in listed and calendar != recurrence.HOLIDAYS_CALENDAR and text and text.strip()
+        if calendar in listed and calendar not in recurrence.DAY_CALENDARS and text and text.strip()
     }
     if texts:
         repeat["calendar_texts"] = texts
@@ -109,7 +109,7 @@ def _drop_empty_except(repeat: dict[str, Any]) -> dict[str, Any]:
     return repeat
 
 
-CALENDARS = vol.All([vol.Any(recurrence.HOLIDAYS_CALENDAR, cv.entity_domain("calendar"))], vol.Unique())
+CALENDARS = vol.All([vol.Any(vol.In(recurrence.DAY_CALENDARS), cv.entity_domain("calendar"))], vol.Unique())
 
 REPEAT_SCHEMA = vol.All(
     # a page loaded before the update still sends a single calendar
@@ -208,9 +208,13 @@ EVENT_SCHEMA = vol.Schema(
     }
 )
 
+# a group of agendas is only a name they share; "" for none
+GROUP = vol.All(str, vol.Strip, vol.Length(max=40))
+
 SETTINGS_SCHEMA = vol.Schema(
     {
         vol.Optional("color"): vol.Match(COLOR),
+        vol.Optional("group"): GROUP,
         vol.Optional("icon"): str,
         vol.Optional("kind"): vol.In(devices.KINDS),
         vol.Optional("entities"): [cv.entity_id],
@@ -293,6 +297,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_delete_event,
         ws_detach,
         ws_save_settings,
+        ws_rename_group,
         ws_duplicate,
         ws_set_enabled,
         ws_override,
@@ -462,6 +467,26 @@ async def ws_save_settings(hass: HomeAssistant, connection: websocket_api.Active
     async def run():
         settings = SETTINGS_SCHEMA(msg["settings"])
         await _agenda(hass, msg["entry_id"]).async_save_settings(settings, msg.get("name"), msg["apply"])
+
+    await _guard(connection, msg, run)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "agenda/group/rename",
+        vol.Required("group"): vol.All(GROUP, vol.Length(min=1)),
+        vol.Required("name"): vol.All(GROUP, vol.Length(min=1)),
+    }
+)
+@websocket_api.async_response
+async def ws_rename_group(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Every agenda of the group moves to the new name, which may be another group already."""
+
+    async def run():
+        for agenda in _agendas(hass).values():
+            if agenda.settings.get("group") == msg["group"]:
+                await agenda.async_save_settings({"group": msg["name"]}, None)
 
     await _guard(connection, msg, run)
 

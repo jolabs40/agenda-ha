@@ -140,6 +140,17 @@ class Shared:
         await self._async_save()
         await self.async_rebuild()
 
+    async def async_rename_entity(self, old: str, new: str) -> bool:
+        """An entity got a new id in Home Assistant; whether it was one of these settings."""
+        if old not in (self.school_calendar, self.outdoor_sensor):
+            return False
+        if self.school_calendar == old:
+            self.school_calendar = new
+        if self.outdoor_sensor == old:
+            self.outdoor_sensor = new
+        await self._async_save()
+        return True
+
     def sun(self, day: date, which: str) -> datetime | None:
         """Naive local time of sunrise or sunset on a local day."""
         key = (day, which)
@@ -221,6 +232,12 @@ class Shared:
 
     def is_holiday(self, day: date) -> bool:
         return self._holidays is not None and day in self._holidays
+
+    @property
+    def weekend(self) -> frozenset[int]:
+        """Weekdays of the weekend in the country, Saturday and Sunday when unknown."""
+        days = getattr(self._holidays, "weekend", None)
+        return frozenset(days) if days else recurrence.WEEKEND
 
     def holiday_name(self, day: date) -> str | None:
         return self._holidays.get(day) if self._holidays is not None else None

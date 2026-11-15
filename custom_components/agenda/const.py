@@ -74,6 +74,9 @@ RADIO_GAP_S = 1.0
 UNDO_DELAY_S = 5
 UNDO_MAX = 3
 UNDO_WINDOW_S = 600
+# a thermostat switched off by hand and back on gets the agenda's state after this delay:
+# whoever switched it on may be setting it too
+SWITCHED_ON_DELAY_S = 5
 
 # a device back after being unavailable settles before it gets its state
 AVAILABLE_DELAY_S = 10

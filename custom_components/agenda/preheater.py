@@ -34,7 +34,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import TemperatureConverter
 
-from . import devices, preheat
+from . import devices, preheat, rename
 from .const import CHECK_DELAY_S, DOMAIN, PREHEAT_LIMIT, PREHEAT_TICK, REASON_PREHEAT, REASON_PREHEAT_CANCEL
 from .recurrence import Occurrence, wall
 
@@ -126,6 +126,16 @@ class Preheater:
             },
             "preheat": self.running.as_storage() if self.running else None,
         }
+
+    @callback
+    def rename(self, old: str, new: str) -> bool:
+        """An entity got a new id: its learning goes with it. sync() follows."""
+        changed = rename.in_keys(self.learned, old, new)
+        for kept in (self._rises, self._afters, self._measures):
+            rename.in_keys(kept, old, new)
+        if self.running:
+            changed |= rename.in_state(self.running.state, old, new)
+        return changed
 
     @callback
     def start(self) -> None:

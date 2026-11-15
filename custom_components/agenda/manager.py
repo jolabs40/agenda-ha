@@ -41,7 +41,7 @@ from homeassistant.helpers.script import Script, async_validate_actions_config
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import devices, recurrence
+from . import devices, recurrence, rename
 from .const import (
     CALENDAR_FUTURE,
     CALENDAR_PAST,
@@ -255,6 +255,7 @@ class Agenda:
         school = self.shared.school_calendar
         return recurrence.Context(
             is_holiday=self.shared.is_holiday,
+            weekend=self.shared.weekend,
             calendar_days=days,
             vacation_days=days.get(school, set()) if school else None,
             sun=self.shared.sun,
@@ -837,7 +838,7 @@ class Agenda:
         self.settings.update(settings)
         if name and name != self.entry.title:
             self.hass.config_entries.async_update_entry(self.entry, title=name)
-        for key, off in (("presence_jitter", 0), ("all_day_header", False)):
+        for key, off in (("presence_jitter", 0), ("all_day_header", False), ("group", "")):
             # off is not stored either
             if key in settings and settings[key] == off:
                 del settings[key]
@@ -892,6 +893,32 @@ class Agenda:
         hand are left alone; from the panel's button (take_back), they are taken back too."""
         async with self.run_lock:
             await self.async_apply_state(force=True, reason="apply" if take_back else "resync")
+        self._notify()
+
+    async def async_rename_entity(self, old: str, new: str, shared: bool = False) -> None:
+        """An entity got a new id in Home Assistant: the agenda follows it wherever it keeps it.
+
+        shared: it was one of the shared settings, which may be a condition calendar here.
+        """
+        stored = rename.in_settings(self.settings, old, new)
+        for event in self.events:
+            stored |= rename.in_event(event, old, new)
+        kept = self.control.rename(old, new)
+        kept |= self.preheater.rename(old, new)
+        kept |= rename.in_keys(self._known, old, new)
+        if self.override:
+            kept |= rename.in_state(self.override.get("state"), old, new)
+        rename.in_calendar_keys(self._calendar_days, old, new)
+        if not (stored or kept or shared):
+            return
+        _LOGGER.info("Agenda %s: %s renamed %s", self.name, old, new)
+        if stored:
+            await self.async_save()
+        self._save_runtime()
+        self.control.track()
+        self.preheater.sync()
+        self._track_calendars()
+        self._track_conditions()
         self._notify()
 
     def condition_entities(self) -> set[str]:

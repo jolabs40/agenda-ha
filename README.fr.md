@@ -42,6 +42,11 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   événement se trouve en bas à droite. Le panneau s'ouvre sur le dernier onglet choisi, navigateur
   par navigateur, et la roue dentée de la ligne Tous mène aux réglages communs. Le bord de la
   colonne se glisse pour l'élargir, et chaque navigateur retient aussi sa largeur.
+- Des groupes rangent les agendas : un nom dans le champ Groupe des réglages de l'agenda, et la
+  colonne les range sous ce titre, après les agendas sans groupe. La ligne d'un groupe le replie,
+  coche ou décoche tous ses agendas, l'affiche seul d'un clic sur son nom, et son crayon le renomme
+  pour tous ses agendas d'un coup. Les vues Maison et Liste reprennent ces titres ; sur un téléphone,
+  une pastille par groupe l'affiche seul.
 - Dupliquer, dans les réglages d'un agenda, en fait une copie : mêmes réglages, mêmes événements,
   sans les appareils, à choisir ensuite.
 - Les autres calendriers de Home Assistant (vacances scolaires, calendrier familial...) se cochent
@@ -51,8 +56,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 - Un agenda peut garder ses événements d'une journée entière sous la date, dans la semaine,
   plutôt qu'en bloc sur toute la colonne : pratique pour les fêtes et les anniversaires.
 - Répétition tous les N jours, semaines (jours au choix, ou seulement les semaines paires ou
-  impaires) ou mois (même date, 2e lundi, dernier vendredi...), éventuellement jusqu'à une date.
-  On peut retirer ou ajouter des jours à une série.
+  impaires), mois (même date, 2e lundi, dernier vendredi...) ou ans (un anniversaire, la fête des
+  pères), éventuellement jusqu'à une date. On peut retirer ou ajouter des jours à une série.
 - Le début ou la fin d'un événement peut suivre le lever ou le coucher du soleil, avec un décalage,
   pas avant ou au plus tard à une heure donnée.
 - Des conditions sur des entités : un événement ne prend la main que si, par exemple, quelqu'un
@@ -67,8 +72,9 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   (déplacements, absences), ne garder que ceux-là, ou les deux sur le même événement. Avec plusieurs
   calendriers, un événement dans l'un d'eux suffit, ou il en faut un dans chacun.
   Les jours fériés peuvent être l'un de ces calendriers, pour un événement qui tourne les jours de
-  télétravail ou les jours fériés. Un calendrier peut aussi ne compter que ses événements contenant
-  un texte : les jours rouges du calendrier RTE Tempo, par exemple.
+  télétravail ou les jours fériés, et le week-end aussi : un seul événement couvre alors les
+  week-ends, les jours fériés et les congés. Un calendrier peut aussi ne compter que ses événements
+  contenant un texte : les jours rouges du calendrier RTE Tempo, par exemple.
   L'agenda de l'événement peut lui-même servir de condition : un vendredi répété s'efface devant une
   semaine de congés posée dans le même agenda. Seuls comptent alors les événements qui n'en
   dépendent pas.
@@ -85,6 +91,9 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
 - Chaque appareil est suivi. Indisponible, il reçoit son état à son retour ; s'il ne le prend pas,
   il a droit à un second essai, puis à un problème dans Réparations. Les appareils sans retour
   d'état (volets radio) reçoivent leur commande une fois, l'un après l'autre, avec une courte pause.
+- Une entité renommée dans Home Assistant est suivie partout où l'agenda s'en sert : appareils,
+  conditions, valeur suivie, calendriers, réglages communs. Un appareil qui n'existe plus apparaît
+  introuvable dans les réglages de l'agenda, où on le décoche.
 - Climatiseurs : un événement peut régler le mode, la ventilation et l'oscillation avec la
   température, ou un mode seul (ventilation, déshumidification).
 - Un mode absence pour toute la maison : les agendas qui le suivent gardent leur état d'absence
@@ -183,6 +192,10 @@ choix Réglage fait à la main, dans les réglages de chaque agenda, décide de 
 Un redémarrage garde ces réglages, `agenda.resync` aussi. Appliquer maintenant, dans les réglages,
 reprend tous les appareils. La colonne affiche "réglé à la main jusqu'à...", et le capteur En ce
 moment liste ces appareils dans son attribut `set_by_hand`.
+
+Un thermostat éteint à la main, pour aérer par exemple, puis rallumé reprend aussitôt l'état de
+l'agenda : 17 si l'agenda est passé de 19 à 17 entre-temps. Sauf si on lui donne une autre consigne
+en le rallumant, ou si l'agenda le veut à l'arrêt : il reste alors réglé à la main.
 
 Un thermostat qui s'arrête de lui-même n'est pas réglé à la main : Versatile Thermostat s'éteint
 seul pour une fenêtre ouverte, son arrêt et relance automatique ou son mode central, et garde ce
@@ -392,6 +405,11 @@ Le réglage Jours fériés restreint toujours les jours, alors qu'une liste comb
 avec Télétravail et Jours fériés sous Seulement les jours avec un événement (dans au moins l'un
 d'eux, le choix par défaut), l'événement tourne les jours de télétravail comme les jours fériés.
 
+Week-end vient juste après dans ces listes. Il compte les jours du week-end du même pays : samedi et
+dimanche presque partout, vendredi et samedi dans quelques pays. Sous Seulement les jours avec un
+événement, avec Week-end, Jours fériés et un calendrier de congés, un événement répété tous les jours
+tourne tous les jours où l'on est à la maison.
+
 Pour les automatisations, le capteur binaire `binary_sensor.agenda_public_holiday` est allumé les
 jours fériés. Ses attributs donnent le nom du jour férié (`holiday`), si le lendemain en est un
 (`tomorrow`) et le prochain (`next_date`, `next_holiday`). Il suit le même pays et la même région
@@ -438,7 +456,8 @@ Toutes les options sont facultatives :
 
 | Option | Vue | Effet |
 |---|---|---|
-| `agendas` | house, next | les agendas affichés, dans cet ordre ; sinon tous, par nom |
+| `agendas` | house, next | les agendas affichés, dans cet ordre ; sinon tous, par groupe puis par nom |
+| `group` | house, next | seulement les agendas de ce groupe, à la place de `agendas` |
 | `names` | toutes | un autre nom dans la carte, par exemple `names: {Chauffe-eau couple: Couple}` |
 | `title`, `icon` | toutes | l'en-tête ; `title: ""` le retire |
 | `absence: false` | toutes | ni bouton ni bandeau d'absence |

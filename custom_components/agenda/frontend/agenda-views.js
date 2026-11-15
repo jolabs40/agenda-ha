@@ -7,9 +7,11 @@ const {
   dayOf,
   effectiveTimeline,
   HOLIDAYS,
+  WEEKEND,
   calendarName,
   esc,
   fmtDay,
+  groupedRows,
   offSchedule,
   repeatSummary,
   splitByDay,
@@ -30,6 +32,8 @@ export { liveText };
 
 const pct = (minutes) => `${((minutes / DAY) * 100).toFixed(4)}%`;
 const hhmm = (m) => (m === DAY ? "24:00" : wallTime(m));
+// the title of a group of agendas, unless the view is told to go without
+const groupTitle = (ctx, cls) => (ctx.titles === false ? null : (group) => `<div class="${cls}">${esc(group)}</div>`);
 
 function occData(agenda, occ) {
   return `data-entry="${esc(agenda.entry_id)}" data-event="${esc(occ.event_id)}" data-day="${esc(occ.day)}" data-start="${esc(occ.start)}" data-end="${esc(occ.end)}" data-allday="${occ.all_day ? 1 : 0}"`;
@@ -185,7 +189,8 @@ export function renderWeek(ctx) {
   const names = Object.fromEntries(all.map((a) => [a.agenda_entities?.calendar, a.name]));
   const colors = Object.fromEntries(all.map((a) => [a.agenda_entities?.calendar, a.settings.color]));
   const nameOf = (id) => names[id] || calendarName(hass, id, T);
-  const colorOf = (id) => (id === HOLIDAYS ? "var(--agenda-holiday)" : colors[id] || "currentColor");
+  const colorOf = (id) =>
+    ({ [HOLIDAYS]: "var(--agenda-holiday)", [WEEKEND]: "var(--primary-color)" })[id] || colors[id] || "currentColor";
   const conditions = (event) => {
     const r = event.repeat || {};
     if (!r.freq || r.freq === "none") return [];
@@ -453,8 +458,9 @@ export function renderHouse(ctx) {
     return svg;
   };
 
-  const rows = agendas
-    .map((agenda) => {
+  const rows = groupedRows(
+    agendas,
+    (agenda) => {
       const occs = ctx.occ[agenda.entry_id] || [];
       const withState = hasStates(agenda);
       const segs = effectiveTimeline(agenda, occs, day + from, day + from + span, withState);
@@ -504,8 +510,9 @@ export function renderHouse(ctx) {
         </div>
         <div class="hs-track">${segHtml}${earlyHtml}${curveOf(agenda)}</div>
       </div>`;
-    })
-    .join("");
+    },
+    groupTitle(ctx, "hs-group"),
+  );
 
   const xRows = (ctx.external || [])
     .map((cal) => {
@@ -549,27 +556,31 @@ export function renderNext(ctx) {
     const day = dayOf(n) === dayOf(now) ? "" : `${fmtDay(n, T._lang, { weekday: "short" })} `;
     return `${day}${wall(n).slice(11)}`;
   };
-  const rows = agendas.map((a) => {
-    const id = esc(a.entry_id);
-    const withState = hasStates(a);
-    const chip = (st, text) => {
-      const color = stateColor(hass, a, st) || "#e0e0e0";
-      return `<span class="nx-chip" style="--c:${esc(color)};--t:${esc(textColor(color))}">${esc(text)}</span>`;
-    };
-    const nowChip = withState ? chip(a.state, a.state ? stateLabel(hass, a, a.state, T) : T.none) : "";
-    let next = "";
-    if (a.next_change) {
-      const left = wm(a.next_change) - now;
-      const what =
-        withState && a.next_state ? chip(a.next_state, stateLabel(hass, a, a.next_state, T)) : esc(a.next_label || "");
-      next = `<span class="nx-next">→ ${what} <span>${esc(T.at)} ${esc(at(a.next_change))}${left >= 0 && left < DAY ? ` · ${esc(T.in_time(left))}` : ""}</span></span>`;
-    }
-    const off = withState ? offSchedule(a, T, at) : [];
-    const can = steer && a.enabled && withState && (a.settings.entities || []).length > 0;
-    const buttons = can
-      ? `${off.length ? `<button class="ic" data-resume="${id}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}${a.next_change ? `<button class="ic" data-advance="${id}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}`
-      : "";
-    return `<div class="nx-row ${a.enabled ? "" : "paused"}">
+  const rows = groupedRows(
+    agendas,
+    (a) => {
+      const id = esc(a.entry_id);
+      const withState = hasStates(a);
+      const chip = (st, text) => {
+        const color = stateColor(hass, a, st) || "#e0e0e0";
+        return `<span class="nx-chip" style="--c:${esc(color)};--t:${esc(textColor(color))}">${esc(text)}</span>`;
+      };
+      const nowChip = withState ? chip(a.state, a.state ? stateLabel(hass, a, a.state, T) : T.none) : "";
+      let next = "";
+      if (a.next_change) {
+        const left = wm(a.next_change) - now;
+        const what =
+          withState && a.next_state
+            ? chip(a.next_state, stateLabel(hass, a, a.next_state, T))
+            : esc(a.next_label || "");
+        next = `<span class="nx-next">→ ${what} <span>${esc(T.at)} ${esc(at(a.next_change))}${left >= 0 && left < DAY ? ` · ${esc(T.in_time(left))}` : ""}</span></span>`;
+      }
+      const off = withState ? offSchedule(a, T, at) : [];
+      const can = steer && a.enabled && withState && (a.settings.entities || []).length > 0;
+      const buttons = can
+        ? `${off.length ? `<button class="ic" data-resume="${id}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}${a.next_change ? `<button class="ic" data-advance="${id}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}`
+        : "";
+      return `<div class="nx-row ${a.enabled ? "" : "paused"}">
       <span class="dot" style="--c:${esc(a.settings.color)}"></span>
       <div class="nx-main"><b>${esc(a.name)}</b>
         <div class="nx-line">${nowChip}${next}</div>
@@ -579,15 +590,18 @@ export function renderNext(ctx) {
       </div>
       ${buttons ? `<div class="nx-act">${buttons}</div>` : ""}
     </div>`;
-  });
-  return `<div class="nx">${rows.join("")}</div>`;
+    },
+    groupTitle(ctx, "nx-group"),
+  );
+  return `<div class="nx">${rows}</div>`;
 }
 
 /** ctx: { hass, T, agendas, editable } */
 export function renderList(ctx) {
   const { hass, T, agendas, editable } = ctx;
-  return agendas
-    .map((agenda) => {
+  return groupedRows(
+    agendas,
+    (agenda) => {
       const events = [...agenda.events].sort((a, b) => {
         const ta = a.all_day ? -1 : wm(a.start) - dayOf(wm(a.start));
         const tb = b.all_day ? -1 : wm(b.start) - dayOf(wm(b.start));
@@ -626,8 +640,9 @@ export function renderList(ctx) {
         <header><span class="dot" style="--c:${esc(agenda.settings.color)}"></span><b>${esc(agenda.name)}</b>${def}</header>
         ${rows}
       </section>`;
-    })
-    .join("");
+    },
+    groupTitle(ctx, "ls-group"),
+  );
 }
 
 export const VIEW_STYLES = `
@@ -636,6 +651,12 @@ export const VIEW_STYLES = `
   .nx-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 4px; border-top: 1px solid var(--agenda-line); }
   .nx-row:first-child { border-top: none; }
   .nx-row .dot { margin-top: 5px; }
+  .hs-group, .nx-group, .ls-group { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--secondary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hs-group { margin-top: 6px; }
+  .nx-group { padding: 12px 4px 2px; }
+  .nx-group + .nx-row { border-top: none; }
+  .ls-group { padding: 14px 8px 0; }
   .nx-row.paused { opacity: .55; }
   .nx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .nx-main b { font-weight: 600; font-size: 14.5px; }

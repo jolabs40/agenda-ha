@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 import copy
 from datetime import datetime
 import logging
@@ -23,11 +23,11 @@ import voluptuous as vol
 
 from homeassistant.core import Context, Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from . import devices
+from . import devices, rename
 from .const import (
     AVAILABLE_DELAY_S,
     CHECK_DELAY_S,
@@ -36,6 +36,7 @@ from .const import (
     EVENT_APPLIED,
     EVENT_FAILED,
     RADIO_GAP_S,
+    SWITCHED_ON_DELAY_S,
     UNAVAILABLE_WARN_S,
     UNDO_DELAY_S,
     UNDO_MAX,
@@ -58,6 +59,10 @@ def _shown(state: State) -> dict[str, Any]:
     """What a device shows, as far as the agenda is concerned."""
     keys = ("temperature", "preset_mode", "hvac_action", "current_position", "brightness", "requested_state")
     return {"state": state.state, **{k: state.attributes[k] for k in keys if k in state.attributes}}
+
+
+def _setpoint(attributes: Mapping[str, Any]) -> tuple[Any, ...]:
+    return tuple(attributes.get(k) for k in ("temperature", "target_temp_low", "target_temp_high", "preset_mode"))
 
 
 def _issue_id(entry_id: str, entity_id: str) -> str:
@@ -102,6 +107,9 @@ class Control:
         self.touched: set[str] = set()
         # devices changed by hand, left alone until then (None: until the schedule is resumed)
         self.holds: dict[str, datetime | None] = {}
+        # thermostats whose change by hand was switching them off, with their setpoint then:
+        # switched back on as they were, they take the agenda's state again
+        self._switched_off: dict[str, tuple[Any, ...]] = {}
         self._own: deque[str] = deque(maxlen=OWN_CONTEXTS)
         # when each device changed by hand was last put back (setting undo)
         self._undone: dict[str, list[float]] = {}
@@ -138,6 +146,7 @@ class Control:
         self.waiting &= linked
         self.touched &= linked
         self.holds = {e: until for e, until in self.holds.items() if e in linked}
+        self._switched_off = {e: setpoint for e, setpoint in self._switched_off.items() if e in linked}
         self._undone = {e: times for e, times in self._undone.items() if e in linked}
         for entity_id in linked:
             state = self.hass.states.get(entity_id)
@@ -145,6 +154,19 @@ class Control:
                 self._remember_mode(entity_id, state)
         if linked:
             self._unsub = async_track_state_change_event(self.hass, sorted(linked), self._on_change)
+
+    @callback
+    def rename(self, old: str, new: str) -> bool:
+        """An entity got a new id: what is kept about it goes with it. track() follows."""
+        changed = False
+        for kept in (self.applied, self.holds, self.last_mode, self._switched_off, self._undone):
+            changed |= rename.in_keys(kept, old, new)
+        changed |= rename.in_set(self.waiting, old, new)
+        changed |= rename.in_set(self.touched, old, new)
+        if cancel := self._away.pop(old, None):
+            cancel()
+            self._warn_if_away(new)
+        return changed
 
     @callback
     def stop(self) -> None:
@@ -172,7 +194,15 @@ class Control:
         def _warn(_now: datetime) -> None:
             self._away.pop(entity_id, None)
             state = self.hass.states.get(entity_id)
-            if entity_id in self.waiting and (state is None or devices.unavailable(state.state, state.attributes)):
+            if entity_id not in self.waiting:
+                return
+            if state is None and er.async_get(self.hass).async_get(entity_id) is None:
+                _LOGGER.warning(
+                    "Agenda %s: %s does not exist, renamed or removed? It can be unchecked in the devices of the agenda",
+                    self.agenda.name,
+                    entity_id,
+                )
+            elif state is None or devices.unavailable(state.state, state.attributes):
                 _LOGGER.warning(
                     "Agenda %s: %s has been unavailable for %d minutes, it will get its state when it is back",
                     self.agenda.name,
@@ -219,6 +249,10 @@ class Control:
         ):
             self.touched.add(entity_id)
             self.note(entity_id, "changed by hand", shown=_shown(new), user=new.context.user_id)
+            if self._mode(entity_id, new) == "off":
+                self._switched_off[entity_id] = _setpoint(devices.asked(entity_id, old.state, old.attributes)[1])
+            else:
+                self._switched_off.pop(entity_id, None)
             self.agenda.manual_change(entity_id)
         elif entity_id in self.holds and not self.own(new.context):
             # put back as the agenda wants it now: the agenda takes it back. What it sent
@@ -226,7 +260,22 @@ class Control:
             now_wanted, _ = self.agenda.desired()
             if now_wanted is not None and devices.reached(entity_id, new.state, new.attributes, now_wanted):
                 self.note(entity_id, "put back by hand", shown=_shown(new))
+                self._switched_off.pop(entity_id, None)
                 self.agenda.manual_end(entity_id)
+            elif (
+                entity_id in self._switched_off
+                and old is not None
+                and self._mode(entity_id, old) == "off"
+                and self._mode(entity_id, new) != "off"
+            ):
+                self._later(entity_id, SWITCHED_ON_DELAY_S, self._async_switched_on)
+
+    @staticmethod
+    def _mode(entity_id: str, state: State) -> str | None:
+        """The mode of a thermostat as it was asked, None for another device."""
+        if devices.domain_of(entity_id) != "climate":
+            return None
+        return devices.asked(entity_id, state.state, state.attributes)[0]
 
     @callback
     def _later(self, entity_id: str, delay: float, job: Callable[..., Coroutine[Any, Any, None]], *args: Any) -> None:
@@ -374,6 +423,36 @@ class Control:
                 return
             _LOGGER.info("Agenda %s: %s is back", agenda.name, entity_id)
             await self.async_apply(entity_id, wanted, "available", occ)
+
+    async def _async_switched_on(self, entity_id: str) -> None:
+        """A thermostat switched off by hand is on again: that change by hand is over.
+
+        It gets the agenda's state, unless it was given another setpoint meanwhile, or the
+        agenda wants it off: switching it on is then the change by hand.
+        """
+        agenda = self.agenda
+        async with agenda.run_lock:
+            state = self.hass.states.get(entity_id)
+            if entity_id not in self._switched_off or not self.held(entity_id) or state is None:
+                return
+            if devices.unavailable(state.state, state.attributes) or self._mode(entity_id, state) == "off":
+                return
+            before = self._switched_off.pop(entity_id)
+            if _setpoint(devices.asked(entity_id, state.state, state.attributes)[1]) != before:
+                return
+            wanted, occ = agenda.desired()
+            if (
+                not agenda.enabled
+                or entity_id not in agenda.linked
+                or wanted is None
+                or wanted.get("type") == "off"
+                or not devices.accepts(agenda.kind, wanted)
+            ):
+                return
+            self.note(entity_id, "switched on by hand", shown=_shown(state))
+            _LOGGER.info("Agenda %s: %s switched on by hand, back to the agenda", agenda.name, entity_id)
+            agenda.manual_end(entity_id)
+            await self.async_apply(entity_id, wanted, "manual_end", occ)
 
     async def _async_check(self, entity_id: str, wanted: dict[str, Any], attempt: int, tries: int) -> None:
         agenda = self.agenda

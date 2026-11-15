@@ -46,6 +46,13 @@ export function entitiesOfKind(hass, kind) {
   return Object.values(hass?.states || {}).filter((s) => domains.includes(domain(s.entity_id)));
 }
 
+/** The devices to pick from, and those the agenda keeps that no longer exist: renamed or
+ *  removed, they are shown to be unchecked. */
+export function entityRows(hass, kind, entities) {
+  const missing = (entities || []).filter((id) => !hass?.states?.[id]).map((id) => ({ entity_id: id, missing: true }));
+  return [...entitiesOfKind(hass, kind), ...missing];
+}
+
 export function liveIcon(agenda) {
   if (kindOf(agenda) === "on_off" && onlyLights(agenda)) return "mdi:lightbulb-outline";
   return LIVE_ICONS[kindOf(agenda)] || "mdi:information-outline";

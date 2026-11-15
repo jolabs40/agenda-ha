@@ -20,7 +20,8 @@ Event shape (missing fields take their default value):
         "exclude": ["2026-11-11"],    # days without an occurrence
         "include": ["2026-12-24"],    # days added on top of the rule
         "holidays": "ignore" | "exclude" | "only",
-        "calendars": ["calendar.trips"],  # condition calendars, none by default; "holidays" = public holidays
+        "calendars": ["calendar.trips"],  # condition calendars, none by default; "holidays" = public
+                                          # holidays, "weekend" = the weekend days
         "calendar_mode": "exclude" | "only",
         "calendar_match": "any" | "all",  # busy in one of them, or in all of them
         "except_calendars": ["calendar.leave"],  # with calendar_mode "only": but not these days
@@ -64,6 +65,11 @@ CALENDAR_ALL = "all"
 CALENDAR_MATCHES = (CALENDAR_ANY, CALENDAR_ALL)
 # in a list of condition calendars, the public holidays: "a calendar's days or a holiday"
 HOLIDAYS_CALENDAR = "holidays"
+# and the weekend: "the weekend, a holiday or a day off" in one event
+WEEKEND_CALENDAR = "weekend"
+# in a list of condition calendars without being calendars
+DAY_CALENDARS = (HOLIDAYS_CALENDAR, WEEKEND_CALENDAR)
+WEEKEND = frozenset({5, 6})
 
 PERIOD_ALWAYS = "always"
 PERIOD_SCHOOL = "school"
@@ -105,6 +111,8 @@ class Context:
     """External facts the engine depends on."""
 
     is_holiday: Callable[[date], bool] = _no_holiday
+    # weekdays of the weekend, Monday = 0; Friday and Saturday in some countries
+    weekend: Set[int] = WEEKEND
     # local days on which a calendar has at least one event, by entity id
     calendar_days: Mapping[str, Set[date]] = field(default_factory=dict)
     # school holiday days, or None when no school calendar is set
@@ -308,15 +316,23 @@ def text_of_key(key: str) -> tuple[str, str | None]:
 
 
 def condition_keys(event: Mapping[str, Any]) -> set[str]:
-    """Keys of the condition calendars of an event, public holidays left out."""
+    """Keys of the condition calendars of an event, public holidays and weekend left out."""
     repeat = event.get("repeat") or {}
     texts = repeat.get("calendar_texts") or {}
     return {
         calendar_key(calendar, texts.get(calendar))
         for key in ("calendars", "except_calendars")
         for calendar in repeat.get(key) or ()
-        if calendar != HOLIDAYS_CALENDAR
+        if calendar not in DAY_CALENDARS
     }
+
+
+def _busy_one(day: date, ctx: Context, calendar: str, text: str | None) -> bool:
+    if calendar == HOLIDAYS_CALENDAR:
+        return ctx.is_holiday(day)
+    if calendar == WEEKEND_CALENDAR:
+        return day.weekday() in ctx.weekend
+    return day in ctx.calendar_days.get(calendar_key(calendar, text), ())
 
 
 def _busy(
@@ -325,12 +341,7 @@ def _busy(
     """Whether the day has an event in one of the calendars, or in each of them; with texts,
     only events containing the calendar's text count."""
     texts = texts or {}
-    busy = [
-        ctx.is_holiday(day)
-        if calendar == HOLIDAYS_CALENDAR
-        else day in ctx.calendar_days.get(calendar_key(calendar, texts.get(calendar)), ())
-        for calendar in calendars
-    ]
+    busy = [_busy_one(day, ctx, calendar, texts.get(calendar)) for calendar in calendars]
     return all(busy) if match == CALENDAR_ALL else any(busy)
 
 
@@ -411,7 +422,7 @@ def starts_on(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> bo
 
 
 def busy_calendars(event: dict[str, Any], day: date, ctx: Context = NO_CONTEXT) -> list[str]:
-    """The condition calendars of the event with something on this day, holidays included."""
+    """The condition calendars of the event with something on this day, holidays and weekend included."""
     repeat = event.get("repeat") or {}
     return [
         calendar

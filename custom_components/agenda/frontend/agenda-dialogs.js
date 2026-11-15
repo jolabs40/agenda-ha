@@ -4,15 +4,17 @@
 const V = new URL(import.meta.url).search;
 const {
   DAY,
-  HOLIDAYS,
+  DAY_CALENDARS,
   dayOf,
   calendarName,
   esc,
   fmtDay,
   friendlyName,
   areaName,
+  isYearly,
   loadHaComponents,
   monthlyLabel,
+  setRepeat,
   SWATCHES,
   wall,
   wallDate,
@@ -559,15 +561,16 @@ export function eventEditor(host, opts) {
         return;
       }
       const r = ev.repeat;
-      const unit = { daily: T.days_unit, weekly: T.weeks_unit, monthly: T.months_unit }[r.freq];
+      const freq = isYearly(r) ? "yearly" : r.freq;
+      const unit = { daily: T.days_unit, weekly: T.weeks_unit, monthly: T.months_unit, yearly: T.years_unit }[freq];
       const curDay = weekday(wm(form.date));
       const wds = r.weekdays.length ? r.weekdays : [curDay];
       sec.innerHTML = `<div class="fld"><span>${esc(T.repeat)}</span>
         <div class="row">
           <select class="inp" data-r="freq">
-            ${["none", "daily", "weekly", "monthly"].map((f) => `<option value="${f}" ${r.freq === f ? "selected" : ""}>${esc({ none: T.once, daily: T.daily, weekly: T.weekly, monthly: T.monthly }[f])}</option>`).join("")}
+            ${["none", "daily", "weekly", "monthly", "yearly"].map((f) => `<option value="${f}" ${freq === f ? "selected" : ""}>${esc({ none: T.once, daily: T.daily, weekly: T.weekly, monthly: T.monthly, yearly: T.yearly }[f])}</option>`).join("")}
           </select>
-          ${r.freq !== "none" ? `<label class="inline">${esc(r.freq === "weekly" ? T.every_f : T.every)} <input type="number" min="1" max="99" class="inp num" data-r="interval" value="${r.interval || 1}"> ${esc(unit)}</label>` : ""}
+          ${r.freq !== "none" ? `<label class="inline">${esc(r.freq === "weekly" ? T.every_f : T.every)} <input type="number" min="1" max="${freq === "yearly" ? 30 : 99}" class="inp num" data-r="interval" value="${freq === "yearly" ? r.interval / 12 : r.interval || 1}"> ${esc(unit)}</label>` : ""}
         </div>
         ${
           r.freq === "weekly"
@@ -590,7 +593,7 @@ export function eventEditor(host, opts) {
                 }
                 ${
                   r.freq === "monthly"
-                    ? `<label class="fld sm"><span>${esc(T.monthly_on)}</span><select class="inp" data-r="monthly">
+                    ? `<label class="fld sm"><span>${esc(freq === "yearly" ? T.yearly_on(fmtDay(wm(form.date), T._lang, { month: "long" })) : T.monthly_on)}</span><select class="inp" data-r="monthly">
                   ${["day", "weekday", "last_weekday"].map((m) => `<option value="${m}" ${r.monthly === m ? "selected" : ""}>${esc(monthlyLabel(wm(form.date), m, T))}</option>`).join("")}
                 </select></label>`
                     : ""
@@ -607,8 +610,7 @@ export function eventEditor(host, opts) {
       sec.querySelectorAll("[data-r]").forEach((inp) =>
         inp.addEventListener("change", () => {
           const k = inp.dataset.r;
-          r[k] =
-            k === "interval" ? Math.max(1, Number(inp.value) || 1) : inp.value || (k === "until" ? null : inp.value);
+          setRepeat(r, k, inp.value);
           if (k === "freq") {
             if (r.freq === "weekly" && !r.weekdays.length) r.weekdays = [curDay];
             sections.repeat();
@@ -642,11 +644,13 @@ export function eventEditor(host, opts) {
           )
           .join("");
       const taken = [...cal.only, ...cal.except];
-      // the public holidays come first, as a calendar of their own
-      const free = [{ entity_id: HOLIDAYS }, ...calendars()].filter((c) => !taken.includes(c.entity_id));
+      // the public holidays and the weekend come first, as calendars of their own
+      const free = [...DAY_CALENDARS.map((id) => ({ entity_id: id })), ...calendars()].filter(
+        (c) => !taken.includes(c.entity_id),
+      );
       // optional text the calendar's events must contain (in their title or description)
       const textInput = (id) =>
-        id === HOLIDAYS
+        DAY_CALENDARS.includes(id)
           ? ""
           : `<input class="inp pill-text" data-cal-text="${esc(id)}" placeholder="${esc(T.containing)}" title="${esc(T.containing_hint)}" value="${esc(calTexts[id] || "")}">`;
       const side = (key) => `<div class="calside">
@@ -1089,7 +1093,7 @@ export function sharedEditor(host, { hass, T, shared, ws }) {
 }
 
 /** opts: { hass, T, agenda, shared, ws, callApi, duplicate }; shared comes from agenda/list. */
-export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, duplicate }) {
+export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, duplicate, groups = [] }) {
   const cfg = structuredClone(agenda.settings);
   cfg.kind = cfg.kind || "none";
   cfg.entities = cfg.entities || [];
@@ -1101,6 +1105,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
   const dlg = new Dialog(host, { title: `${T.settings} · ${agenda.name}`, wide: true });
 
   const body = `<label class="fld"><span>${esc(T.name)}</span><input class="inp" data-name value="${esc(name)}"></label>
+    <label class="fld"><span>${esc(T.group)}</span><input class="inp" data-group list="agenda-groups" maxlength="40" placeholder="${esc(T.group_none)}" value="${esc(cfg.group || "")}"><datalist id="agenda-groups">${groups.map((g) => `<option value="${esc(g)}"></option>`).join("")}</datalist><p class="hint">${esc(T.group_hint)}</p></label>
     <div class="fld"><span>${esc(T.color)}</span><div class="swatches" data-swatches></div></div>
     <label class="tgl"><input type="checkbox" data-allday-head ${cfg.all_day_header ? "checked" : ""}><span></span>${esc(T.all_day_header)}</label>
     <section data-sec="kind"></section>
@@ -1194,7 +1199,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
       const label = (s) => friendlyName(hass, s.entity_id);
       const where = (s) => areaName(hass, s.entity_id);
       const rows = kinds
-        .entitiesOfKind(hass, cfg.kind)
+        .entityRows(hass, cfg.kind, cfg.entities)
         .sort(
           (a, b) =>
             cfg.entities.includes(b.entity_id) - cfg.entities.includes(a.entity_id) || label(a).localeCompare(label(b)),
@@ -1206,8 +1211,8 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
             .map((s) => {
               one.settings.entities = [s.entity_id];
               return `<label class="clim-row"><input type="checkbox" data-cl="${esc(s.entity_id)}" ${cfg.entities.includes(s.entity_id) ? "checked" : ""}>
-                <span><b>${esc(label(s))}</b><small>${esc([where(s), s.entity_id].filter(Boolean).join(" · "))}</small></span>
-                <em>${esc(kinds.liveText(hass, one, T))}</em></label>`;
+                <span><b>${esc(label(s))}</b><small>${esc([where(s), !s.missing && s.entity_id].filter(Boolean).join(" · "))}</small></span>
+                <em class="${s.missing ? "missing" : ""}">${esc(s.missing ? T.missing_entity : kinds.liveText(hass, one, T))}</em></label>`;
             })
             .join("")
         : `<div class="clim-empty">${esc(T.no_entity)}</div>`;
@@ -1285,6 +1290,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
   const common = sharedFields(dlg.$('[data-sec="holidays"]'), { hass, T, shared, ws });
 
   dlg.$("[data-name]").addEventListener("input", (x) => (name = x.target.value));
+  dlg.$("[data-group]").addEventListener("input", (x) => (cfg.group = x.target.value.trim()));
   dlg.$("[data-resync]").addEventListener("change", (x) => (cfg.resync_on_start = x.target.checked));
   dlg.$("[data-allday-head]").addEventListener("change", (x) => (cfg.all_day_header = x.target.checked));
   dlg.$("[data-manual]").addEventListener("change", (x) => (cfg.manual_hold = x.target.value));
@@ -1297,6 +1303,7 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
       settings: {
         color: cfg.color,
         icon: cfg.icon,
+        group: cfg.group || "",
         kind: cfg.kind,
         entities: cfg.kind === "none" ? [] : cfg.entities,
         default_state: cfg.kind === "none" ? null : (cfg.default_state ?? null),
@@ -1470,6 +1477,7 @@ export const DIALOG_STYLES = `
   .clim-row em { font-style: normal; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
   .clim-row input { accent-color: var(--primary-color); width: 18px; height: 18px; }
   .clim-row em { white-space: nowrap; }
+  .clim-row em.missing { color: var(--error-color); }
   .clim-empty { padding: 12px; color: var(--secondary-text-color); font-size: 13px; }
   .kinds { display: flex; flex-wrap: wrap; gap: 8px; }
   .kind { font: inherit; font-size: 13.5px; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 10px; cursor: pointer;

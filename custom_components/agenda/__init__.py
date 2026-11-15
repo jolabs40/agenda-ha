@@ -13,7 +13,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
 from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall, callback
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.start import async_at_started
@@ -62,6 +62,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             await agenda.async_context_changed()
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _core_config_updated)
+
+    async def _entity_renamed(old: str, new: str) -> None:
+        in_shared = await shared.async_rename_entity(old, new)
+        for agenda in list(hass.data[DOMAIN]["agendas"].values()):
+            await agenda.async_rename_entity(old, new, in_shared)
+
+    @callback
+    def _registry_updated(event: Event) -> None:
+        # an entity given a new id keeps it wherever the agendas use it
+        if event.data.get("action") == "update" and event.data.get("old_entity_id"):
+            hass.async_create_task(_entity_renamed(event.data["old_entity_id"], event.data["entity_id"]))
+
+    hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, _registry_updated)
 
     async def _set_absence(call: ServiceCall) -> None:
         await shared.async_check_editor(call.context)
