@@ -373,8 +373,9 @@ export function renderMonth(ctx) {
             : eventLabel(hass, agenda, event, T);
         const time = occ.all_day || later ? "" : wallTime(wm(occ.start));
         const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), time].filter(Boolean).join(" · ");
+        const icon = eventIcon(agenda, event);
         return `<div class="mo-ev" ${occData(agenda, occ)} style="--c:${esc(color)};--t:${esc(textColor(color))}" title="${esc(tip)}">
-          ${time ? `<b>${time}</b>` : ""}<span>${esc(label)}</span></div>`;
+          ${time ? `<b>${time}</b>` : ""}<span>${esc(label)}</span>${icon ? `<ha-icon icon="${esc(icon)}"></ha-icon>` : ""}</div>`;
       })
       .join("");
     const more =
@@ -460,7 +461,7 @@ export function renderHouse(ctx) {
 
   const rows = groupedRows(
     agendas,
-    (agenda) => {
+    (agenda, inGroup) => {
       const occs = ctx.occ[agenda.entry_id] || [];
       const withState = hasStates(agenda);
       const segs = effectiveTimeline(agenda, occs, day + from, day + from + span, withState);
@@ -503,7 +504,7 @@ export function renderHouse(ctx) {
             `<div class="early" style="left:${at(a)};width:${long(b - a)};--c:${esc(eventColor(hass, agenda, target))}"></div>`,
         )
         .join("");
-      return `<div class="hs-row ${agenda.enabled ? "" : "paused"}">
+      return `<div class="hs-row ${agenda.enabled ? "" : "paused"} ${inGroup ? "in" : ""}">
         <div class="hs-name" data-select="${esc(agenda.entry_id)}">
           <span class="dot" style="--c:${esc(agenda.settings.color)}"></span>
           <div><b>${esc(agenda.name)}</b>${ctx.live === false ? "" : `<small><ha-icon icon="${liveIcon(agenda)}"></ha-icon><span data-live="${esc(agenda.entry_id)}">${esc(liveText(hass, agenda, T))}</span></small>`}</div>
@@ -558,7 +559,7 @@ export function renderNext(ctx) {
   };
   const rows = groupedRows(
     agendas,
-    (a) => {
+    (a, inGroup) => {
       const id = esc(a.entry_id);
       const withState = hasStates(a);
       const chip = (st, text) => {
@@ -580,7 +581,7 @@ export function renderNext(ctx) {
       const buttons = can
         ? `${off.length ? `<button class="ic" data-resume="${id}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}${a.next_change ? `<button class="ic" data-advance="${id}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}`
         : "";
-      return `<div class="nx-row ${a.enabled ? "" : "paused"}">
+      return `<div class="nx-row ${a.enabled ? "" : "paused"} ${inGroup ? "in" : ""}">
       <span class="dot" style="--c:${esc(a.settings.color)}"></span>
       <div class="nx-main"><b>${esc(a.name)}</b>
         <div class="nx-line">${nowChip}${next}</div>
@@ -601,7 +602,7 @@ export function renderList(ctx) {
   const { hass, T, agendas, editable } = ctx;
   return groupedRows(
     agendas,
-    (agenda) => {
+    (agenda, inGroup) => {
       const events = [...agenda.events].sort((a, b) => {
         const ta = a.all_day ? -1 : wm(a.start) - dayOf(wm(a.start));
         const tb = b.all_day ? -1 : wm(b.start) - dayOf(wm(b.start));
@@ -636,7 +637,7 @@ export function renderList(ctx) {
         hasStates(agenda) && agenda.settings.default_state
           ? `<div class="li-default"><span class="sw" style="--c:${esc(stateColor(hass, agenda, agenda.settings.default_state))};--t:#1f1f1f">${esc(stateLabel(hass, agenda, agenda.settings.default_state, T))}</span><small>${esc(T.default_state)}</small></div>`
           : "";
-      return `<section class="ls">
+      return `<section class="ls ${inGroup ? "in" : ""}">
         <header><span class="dot" style="--c:${esc(agenda.settings.color)}"></span><b>${esc(agenda.name)}</b>${def}</header>
         ${rows}
       </section>`;
@@ -657,6 +658,11 @@ export const VIEW_STYLES = `
   .nx-group { padding: 12px 4px 2px; }
   .nx-group + .nx-row { border-top: none; }
   .ls-group { padding: 14px 8px 0; }
+  /* the agendas of a group are set off, so that those after it are not taken for its own */
+  .hs-row.in .hs-name { padding-left: min(16px, calc(var(--name-w) / 8)); }
+  .hs-row.in + .hs-row:not(.in) { margin-top: 6px; }
+  .nx-row.in { padding-left: 22px; }
+  .ls.in { padding-left: 18px; }
   .nx-row.paused { opacity: .55; }
   .nx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .nx-main b { font-weight: 600; font-size: 14.5px; }
@@ -787,6 +793,7 @@ export const VIEW_STYLES = `
     background: var(--c); color: var(--t); cursor: pointer; white-space: nowrap; overflow: hidden; }
   .mo-ev b { font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
   .mo-ev span { overflow: hidden; text-overflow: ellipsis; }
+  .mo-ev ha-icon { --mdc-icon-size: 14px; flex: none; align-self: center; margin-left: auto; opacity: .8; }
   .mo-more { font-size: 11.5px; color: var(--secondary-text-color); padding: 0 6px; }
   .mo-ev.mo-x { background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--primary-text-color);
     border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent); line-height: 1.35; }

@@ -15,18 +15,23 @@ function alone(p, group) {
   return shown.length === mine.length && mine.every((id) => shown.includes(id));
 }
 
-/** The rows of the column: the agendas without a group, then each group under its own line. */
+/** The rows of the column, in the order of the agendas: each group under its own line, where
+ *  its name falls among them. */
 export function columnRows(p, row, box) {
   const agendas = p._data.agendas;
-  return [
-    ...agendas.filter((a) => !groupOf(a)).map(row),
-    ...groupsOf(agendas).map((group) => {
-      const mine = agendas.filter((a) => groupOf(a) === group);
-      const on = mine.filter((a) => !p._hidden.has(a.entry_id)).length;
-      const head = groupLine(p, group, mine.length, on, box);
-      return p._folded.has(group) ? head : head + mine.map(row).join("");
-    }),
-  ].join("");
+  return agendas
+    .map((a, i) => {
+      const group = groupOf(a);
+      if (!group) return row(a);
+      let head = "";
+      if (i === 0 || groupOf(agendas[i - 1]) !== group) {
+        const mine = agendas.filter((b) => groupOf(b) === group);
+        const on = mine.filter((b) => !p._hidden.has(b.entry_id)).length;
+        head = groupLine(p, group, mine.length, on, box);
+      }
+      return head + (p._folded.has(group) ? "" : row(a));
+    })
+    .join("");
 }
 
 function groupLine(p, group, count, on, box) {
@@ -122,6 +127,7 @@ async function rename(p, group, name) {
 export const GROUP_STYLES = `
   .sa.grp { margin-top: 6px; }
   .sa.in { margin-left: 24px; }
+  .sa.in + .sa:not(.in), .sa.grp + .sa:not(.in):not(.grp) { margin-top: 6px; }
   .grp-fold { flex: none; width: 24px; height: 36px; display: grid; place-items: center; border: none; background: none; padding: 0; cursor: pointer;
     color: var(--secondary-text-color); --mdc-icon-size: 20px; }
   .grp-name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; font: inherit; border: none; background: none; color: inherit;

@@ -318,21 +318,25 @@ export function effectiveTimeline(agenda, occs, from, to, withState) {
 /** The group of an agenda, "" when it has none. */
 export const groupOf = (agenda) => agenda.settings?.group || "";
 
-/** The agendas without a group first, then each group by name, keeping the order within. */
+/** By name, each group where its own name falls, its agendas together and by name under it. */
 export const byGroup = (agendas) =>
-  [...agendas].sort((a, b) => !!groupOf(a) - !!groupOf(b) || groupOf(a).localeCompare(groupOf(b)));
+  [...agendas].sort((a, b) => {
+    const [ga, gb] = [groupOf(a), groupOf(b)];
+    return (ga || a.name).localeCompare(gb || b.name) || !!ga - !!gb || a.name.localeCompare(b.name);
+  });
 
 export const groupsOf = (agendas) =>
   [...new Set(agendas.map(groupOf).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 
-/** One row per agenda, with a title before each group when they are not all in the same one. */
+/** One row per agenda, with a title before each group when they are not all in the same one.
+ *  row(agenda, inGroup): inGroup is true under a title, for the row to be set off from the others. */
 export function groupedRows(agendas, row, title) {
   const titled = title && new Set(agendas.map(groupOf)).size > 1;
   return agendas
     .map((a, i) => {
-      const group = groupOf(a);
-      const head = titled && group && (i === 0 || groupOf(agendas[i - 1]) !== group) ? title(group) : "";
-      return head + row(a);
+      const group = titled && groupOf(a);
+      const head = group && (i === 0 || groupOf(agendas[i - 1]) !== group) ? title(group) : "";
+      return head + row(a, !!group);
     })
     .join("");
 }

@@ -142,7 +142,7 @@ class AgendaCard extends HTMLElement {
     };
     if (this._config.view !== "week") {
       const { agendas: only, group } = this._config;
-      if (group) return all.filter((a) => lib.groupOf(a) === group).map(named);
+      if (group) return lib.byGroup(all.filter((a) => lib.groupOf(a) === group)).map(named);
       if (!only) return lib.byGroup(all).map(named);
       const list = [].concat(only).map(find).filter(Boolean);
       return list.filter((a, i) => list.indexOf(a) === i).map(named);
@@ -385,7 +385,7 @@ class AgendaCardEditor extends HTMLElement {
   async _load() {
     try {
       const data = await this._hass.callWS({ type: "agenda/list" });
-      this._names = data.agendas.map((a) => a.name);
+      this._names = lib.byGroup(data.agendas).map((a) => a.name);
       this._groupOf = Object.fromEntries(data.agendas.map((a) => [a.name, lib.groupOf(a)]));
     } catch (_err) {
       this._names = [];
@@ -415,13 +415,7 @@ class AgendaCardEditor extends HTMLElement {
     const number = (min, max) => ({ number: { min, max, mode: "box" } });
     // one field per agenda shown, labelled with its own name
     const groups = [...new Set(Object.values(this._groupOf).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    const inGroup = this._names.filter((name) => this._groupOf[name] === c.group);
-    this._shown =
-      view === "week"
-        ? [c.agenda || this._names[0]].filter(Boolean)
-        : c.group
-          ? inGroup
-          : [].concat(c.agendas || this._names);
+    this._shown = this._shownOf(c);
     this._nameFields = this._shown.map((name) => ({ name, selector: { text: {} } }));
     const display = {
       house: [
@@ -501,13 +495,17 @@ class AgendaCardEditor extends HTMLElement {
     };
   }
 
+  /** The agendas a configuration shows, one name field each. */
+  _shownOf(c) {
+    if ((c.view || "house") === "week") return [c.agenda || this._names[0]].filter(Boolean);
+    if (c.group) return this._names.filter((name) => this._groupOf[name] === c.group);
+    return [].concat(c.agendas || this._names);
+  }
+
   _changed(value) {
+    const before = this._config;
     const config = { ...value };
-    // only the names of the agendas shown, and only those written
-    const names = Object.fromEntries(
-      Object.entries(config.names || {}).filter(([key, name]) => this._shown.includes(key) && String(name).trim()),
-    );
-    config.names = names;
+    delete config.names;
     // empty fields are left out of the YAML
     for (const key of Object.keys(config)) {
       const v = config[key];
@@ -521,12 +519,29 @@ class AgendaCardEditor extends HTMLElement {
       week: ["agenda", "days", "hour_height"],
       next: ["agendas", "group", "buttons"],
     };
-    // a group takes the place of a list of agendas
-    if (config.group) delete config.agendas;
     const view = config.view || "house";
+    // a group, or the week view, takes the place of a list of agendas, which comes back
+    // once they are left
+    const kept = (this._kept ||= { names: {} });
+    const listed = (c) => !c.group && (c.view || "house") !== "week";
+    if (listed(before)) kept.agendas = config.agendas;
+    if (!listed(config)) delete config.agendas;
+    else if (!listed(before) && kept.agendas) config.agendas = kept.agendas;
     const others = new Set(Object.values(only).flat());
     for (const key of only[view]) others.delete(key);
     for (const key of others) delete config[key];
+    // the names of the agendas shown, and only those written; the others wait aside while
+    // editing, should their agenda be shown again
+    const typed = value.names || {};
+    for (const key of this._shown) if (!String(typed[key] ?? "").trim()) delete kept.names[key];
+    const shown = this._shownOf(config);
+    const names = {};
+    for (const [key, name] of Object.entries({ ...kept.names, ...typed })) {
+      if (!String(name ?? "").trim()) continue;
+      if (shown.includes(key)) names[key] = name;
+      else kept.names[key] = name;
+    }
+    if (Object.keys(names).length) config.names = names;
     this._config = config;
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
     this._render();

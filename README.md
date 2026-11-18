@@ -38,10 +38,10 @@ agenda goes back to its default state.
   the last tab picked, browser by browser, and the gear on the All row leads to the shared settings.
   The edge of the column can be dragged to make it wider, which each browser remembers too.
 - Groups sort the agendas: a name in the Group field of an agenda's settings, and the column files
-  it under that title, after the agendas without a group. The line of a group folds it, ticks or
-  unticks all its agendas, shows it alone with a click on its name, and its pencil renames it for
-  all its agendas at once. The House and List views use the same titles; on a phone, a chip per
-  group shows it alone.
+  it under that title, set off from the others, the group taking its place by name among the
+  agendas. The line of a group folds it, ticks or unticks all its agendas, shows it alone with a
+  click on its name, and its pencil renames it for all its agendas at once. The House and List
+  views use the same titles; on a phone, a chip per group shows it alone.
 - Duplicate, in the settings of an agenda, makes a copy of it: same settings, same events, without
   the devices, to pick next.
 - Other calendars of Home Assistant (school holidays, a family calendar...) can be ticked in the
@@ -429,7 +429,7 @@ Every option is optional:
 
 | Option | View | Effect |
 |---|---|---|
-| `agendas` | house, next | the agendas shown, in this order; all of them by group then by name otherwise |
+| `agendas` | house, next | the agendas shown, in this order; all of them by name otherwise, each group at its own name |
 | `group` | house, next | only the agendas of this group, in place of `agendas` |
 | `names` | all | another name in the card, for example `names: {Water heater couple: Couple}` |
 | `title`, `icon` | all | the header; `title: ""` leaves it out |

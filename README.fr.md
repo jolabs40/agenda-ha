@@ -43,10 +43,10 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
   par navigateur, et la roue dentée de la ligne Tous mène aux réglages communs. Le bord de la
   colonne se glisse pour l'élargir, et chaque navigateur retient aussi sa largeur.
 - Des groupes rangent les agendas : un nom dans le champ Groupe des réglages de l'agenda, et la
-  colonne les range sous ce titre, après les agendas sans groupe. La ligne d'un groupe le replie,
-  coche ou décoche tous ses agendas, l'affiche seul d'un clic sur son nom, et son crayon le renomme
-  pour tous ses agendas d'un coup. Les vues Maison et Liste reprennent ces titres ; sur un téléphone,
-  une pastille par groupe l'affiche seul.
+  colonne les range sous ce titre, en retrait, le groupe prenant sa place par son nom parmi les
+  agendas. La ligne d'un groupe le replie, coche ou décoche tous ses agendas, l'affiche seul d'un
+  clic sur son nom, et son crayon le renomme pour tous ses agendas d'un coup. Les vues Maison et
+  Liste reprennent ces titres ; sur un téléphone, une pastille par groupe l'affiche seul.
 - Dupliquer, dans les réglages d'un agenda, en fait une copie : mêmes réglages, mêmes événements,
   sans les appareils, à choisir ensuite.
 - Les autres calendriers de Home Assistant (vacances scolaires, calendrier familial...) se cochent
@@ -456,7 +456,7 @@ Toutes les options sont facultatives :
 
 | Option | Vue | Effet |
 |---|---|---|
-| `agendas` | house, next | les agendas affichés, dans cet ordre ; sinon tous, par groupe puis par nom |
+| `agendas` | house, next | les agendas affichés, dans cet ordre ; sinon tous par nom, chaque groupe à son nom |
 | `group` | house, next | seulement les agendas de ce groupe, à la place de `agendas` |
 | `names` | toutes | un autre nom dans la carte, par exemple `names: {Chauffe-eau couple: Couple}` |
 | `title`, `icon` | toutes | l'en-tête ; `title: ""` le retire |
