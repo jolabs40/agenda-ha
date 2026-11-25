@@ -19,7 +19,12 @@
   "entity": {
     "switch": {
       "enabled": {
-        "name": "Actief"
+        "name": "Actief",
+        "state_attributes": {
+          "resume_at": {
+            "name": "Hervat om"
+          }
+        }
       },
       "absence": {
         "name": "Afwezigheidsmodus"
@@ -73,7 +78,7 @@
     },
     "add_dates": {
       "name": "Datums toevoegen",
-      "description": "Voegt op deze dagen gebeurtenissen toe, bovenop de herhaling.",
+      "description": "Voegt op deze dagen gebeurtenissen toe, bovenop de herhaling. Zonder gebeurtenis met deze naam wordt er een gemaakt, de hele dag.",
       "fields": {
         "event": {
           "name": "Gebeurtenis",

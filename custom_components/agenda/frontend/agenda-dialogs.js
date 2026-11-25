@@ -31,7 +31,7 @@ const minutesOf = (hhmm) => wm(`2000-01-01T${hhmm}`) - wm("2000-01-01T00:00");
 const kinds = await import(`./agenda-kinds.js${V}`);
 const { PREHEAT_STYLES, outdoorOptions, preheatSection, preheatSettings } = await import(`./agenda-preheat.js${V}`);
 
-class Dialog {
+export class Dialog {
   constructor(host, { title, wide = false }) {
     this.host = host; // the panel's #dialog element
     this.wide = wide;
@@ -634,7 +634,9 @@ export function eventEditor(host, opts) {
     exceptions() {
       const sec = dlg.$('[data-sec="exceptions"]');
       const wrap = dlg.$('[data-sec-wrap="exceptions"]');
-      wrap.hidden = st.scope === "once" || ev.repeat.freq === "none";
+      // an event that does not repeat keeps the days added to it, by hand or by add_dates
+      const single = ev.repeat.freq === "none";
+      wrap.hidden = st.scope === "once";
       const r = ev.repeat;
       const list = (key) =>
         (r[key] || [])
@@ -666,16 +668,16 @@ export function eventEditor(host, opts) {
           ${cal[key].length > 1 ? `<select class="inp" data-cal-match="${key}">${["any", "all"].map((m) => `<option value="${m}" ${cal[`${key}_match`] === m ? "selected" : ""}>${esc(T[`calendar_${m}`])}</option>`).join("")}</select>` : ""}
         </div>`;
       sec.innerHTML =
-        ["exclude", "include"]
+        (single ? ["include"] : ["exclude", "include"])
           .map(
             (key) => `<div class="fld"><span>${esc(key === "exclude" ? T.excluded : T.included)}</span>
             <div class="pills">${list(key)}<span class="add"><input type="date" class="inp" data-add-date="${key}"><button class="btn flat" data-add="${key}">${esc(T.add)}</button></span></div></div>`,
           )
           .join("") +
-        `<div class="fld"><span>${esc(T.calendar_condition)}</span><p class="hint">${esc(T.calendar_hint)}</p>
+        `<div class="fld" ${single ? "hidden" : ""}><span>${esc(T.calendar_condition)}</span><p class="hint">${esc(T.calendar_hint)}</p>
           ${side("only")}${side("except")}
           </div>`;
-      const n = (r.exclude || []).length + (r.include || []).length + taken.length;
+      const n = (r.include || []).length + (single ? 0 : (r.exclude || []).length + taken.length);
       dlg.$("[data-count]").textContent = n ? ` · ${n}` : "";
       sec.querySelectorAll("[data-rm]").forEach((b) =>
         b.addEventListener("click", () => {
@@ -1164,8 +1166,9 @@ export function settingsEditor(host, { hass, T, agenda, shared, ws, callApi, dup
         b.addEventListener("click", () => {
           if (cfg.kind === b.dataset.kind) return;
           cfg.kind = b.dataset.kind;
-          cfg.entities = cfg.kind === initialKind ? structuredClone(agenda.settings.entities || []) : [];
-          cfg.default_state = cfg.kind === initialKind ? structuredClone(agenda.settings.default_state ?? null) : null;
+          const same = cfg.kind === initialKind;
+          cfg.entities = same ? structuredClone(agenda.settings.entities || []) : [];
+          cfg.default_state = same ? structuredClone(agenda.settings.default_state ?? null) : kinds.defaultOf(cfg.kind);
           filter = "";
           sections.kind();
           sections.entities();

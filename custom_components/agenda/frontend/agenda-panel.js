@@ -8,6 +8,7 @@ const views = await import(`./agenda-views.js${V}`);
 const dialogs = await import(`./agenda-dialogs.js${V}`);
 const { preheatNote } = await import(`./agenda-preheat.js${V}`);
 const groups = await import(`./agenda-groups.js${V}`);
+const pause = await import(`./agenda-pause.js${V}`);
 
 const {
   DAY,
@@ -394,7 +395,7 @@ class AgendaPanel extends HTMLElement {
   /** One line under an agenda's name: its state now and the next change. */
   _summary(a) {
     const T = this.T;
-    if (!a.enabled) return T.paused;
+    if (!a.enabled) return lib.pausedText(a, T);
     if (!kinds.hasStates(a)) return "";
     const hass = this._hass;
     const parts = [a.state ? kinds.stateLabel(hass, a, a.state, T) : T.none];
@@ -431,7 +432,7 @@ class AgendaPanel extends HTMLElement {
       return `<div class="sa ${on ? "" : "off"} ${a.enabled ? "" : "paused"} ${lib.groupOf(a) ? "in" : ""}">
           <button class="cb-btn" data-check="${esc(a.entry_id)}" role="checkbox" aria-checked="${on}" aria-label="${esc(a.name)}">${box(on ? "on" : "", color, textColor(color))}</button>
           <ha-icon class="sa-kind" icon="${esc(kinds.kindIcon(a))}" title="${esc(T.kinds[kinds.kindOf(a)] || "")}"></ha-icon>
-          <button class="sa-name" data-solo="${esc(a.entry_id)}" title="${esc(`${a.name}\n${alone ? T.show_all : T.show_only}`)}"><b>${esc(a.name)}</b><small>${esc(this._summary(a))}</small></button>
+          <button class="sa-name" data-solo="${esc(a.entry_id)}" title="${esc(`${a.name}\n${alone ? T.show_all : T.show_only}`)}"><b>${esc(a.name)}</b><small>${a.enabled ? "" : `<ha-icon icon="mdi:lock-outline"></ha-icon>`}${esc(this._summary(a))}</small></button>
           ${this._canSteer(a) && this._offSchedule(a).length ? `<button class="ic sm keep" data-resume="${esc(a.entry_id)}" title="${esc(T.resume)}"><ha-icon icon="mdi:restore"></ha-icon></button>` : ""}
           ${this._canSteer(a) && a.next_change ? `<button class="ic sm" data-advance="${esc(a.entry_id)}" title="${esc(T.advance)}"><ha-icon icon="mdi:skip-next"></ha-icon></button>` : ""}
           <label class="tgl sm" title="${esc(a.enabled ? T.active : T.paused)}"><input type="checkbox" data-enabled="${esc(a.entry_id)}" ${a.enabled ? "checked" : ""}><span></span></label>
@@ -600,7 +601,9 @@ class AgendaPanel extends HTMLElement {
         `<span class="st-pre"><ha-icon icon="mdi:thermometer-chevron-up"></ha-icon>${esc(preheatNote(sel, T))}</span>`,
       );
     if (!sel.enabled)
-      parts.push(`<span class="st-paused"><ha-icon icon="mdi:lock-outline"></ha-icon>${esc(T.paused)}</span>`);
+      parts.push(
+        `<span class="st-paused"><ha-icon icon="mdi:lock-outline"></ha-icon>${esc(lib.pausedText(sel, T))}</span>`,
+      );
     const off = withState ? this._offSchedule(sel) : [];
     if (off.length)
       parts.push(
@@ -855,8 +858,20 @@ class AgendaPanel extends HTMLElement {
 
   async _onChange(e) {
     if (e.target.matches("[data-enabled]")) {
-      const entry = e.target.dataset.enabled;
-      await this._try(() => this.ws({ type: "agenda/set_enabled", entry_id: entry, enabled: e.target.checked }));
+      const input = e.target;
+      const entry = input.dataset.enabled;
+      if (input.checked) {
+        await this._try(() => this.ws({ type: "agenda/set_enabled", entry_id: entry, enabled: true }));
+        return;
+      }
+      // until when; let go, it stays on
+      const done = await pause.pauseDialog(this.dialogHost, {
+        T: this.T,
+        agenda: this._agenda(entry),
+        now: this._now(),
+        ws: (m) => this.ws(m),
+      });
+      if (!done) input.checked = true;
     }
   }
 
@@ -1307,6 +1322,7 @@ const STYLES = `
   .sa-name small:empty { display: none; }
   .sa.off .sa-name { opacity: .5; }
   .sa.paused small { color: var(--warning-color, #f57c00); }
+  .sa-name small ha-icon { --mdc-icon-size: 13px; vertical-align: -2px; margin-right: 2px; }
   .sa .tgl { flex: none; }
   .sa .ic.sm { flex: none; width: 30px; height: 30px; opacity: 0; transition: opacity .15s; }
   .sa:hover .ic.sm, .sa .ic.sm:focus-visible, .sa .ic.sm.keep { opacity: .75; }

@@ -519,15 +519,22 @@ async def ws_duplicate(hass: HomeAssistant, connection: websocket_api.ActiveConn
         vol.Required("type"): "agenda/set_enabled",
         vol.Required("entry_id"): cv.string,
         vol.Required("enabled"): bool,
+        # paused: when it resumes, local "2026-11-22T16:00"; None until turned back on
+        vol.Optional("resume_at", default=None): vol.Any(None, cv.string),
     }
 )
 @websocket_api.async_response
 async def ws_set_enabled(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
-    await _guard(
-        connection,
-        msg,
-        lambda: _agenda(hass, msg["entry_id"]).async_set_enabled(msg["enabled"]),
-    )
+    async def run():
+        resume_at = None
+        if msg["resume_at"] and not msg["enabled"]:
+            local = datetime.fromisoformat(msg["resume_at"]).replace(tzinfo=dt_util.get_default_time_zone())
+            resume_at = dt_util.as_utc(local)
+            if resume_at <= dt_util.utcnow():
+                raise HomeAssistantError("the pause would end in the past")
+        await _agenda(hass, msg["entry_id"]).async_set_enabled(msg["enabled"], resume_at)
+
+    await _guard(connection, msg, run)
 
 
 @require_editor

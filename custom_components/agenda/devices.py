@@ -274,10 +274,16 @@ def _close(value: Any, target: Any, tolerance: float) -> bool:
 
 def unavailable(current: str | None, attributes: Mapping[str, Any]) -> bool:
     """Whether a device cannot be commanded now. A device with an assumed state (a shutter
-    driven by radio, without feedback) is unknown until its first command: it takes one."""
+    driven by radio, without feedback) is unknown until its first command: it takes one.
+    So does a thermostat that shows a setpoint while its integration gives no mode (some
+    pilot wire heaters): it stays unknown for good, and takes its setpoint all the same. Its
+    list of modes may be empty too (Tuya), but a thermostat always has one."""
     if current is None or current == "unavailable":
         return True
-    return current == "unknown" and not attributes.get("assumed_state")
+    if current != "unknown":
+        return False
+    setpoint = "hvac_modes" in attributes and isinstance(attributes.get("temperature"), (int, float))
+    return not attributes.get("assumed_state") and not setpoint
 
 
 def moving(entity_id: str, current: str) -> bool:

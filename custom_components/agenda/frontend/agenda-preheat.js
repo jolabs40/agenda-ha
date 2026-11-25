@@ -71,16 +71,17 @@ export function preheatSection(sec, { hass, T, agenda, cfg, reset }) {
     return;
   }
   const limit = Number(cfg.preheat_max_minutes) || LIMIT.usual;
+  // the temperature of the room, shown in the views: chosen with or without the early start
+  const sensor = `<label class="fld"><span>${esc(T.preheat_sensor)}</span>
+      <select class="inp" data-preheat-sensor>${options(hass, cfg.temperature_sensor, isTemperature, T.preheat_sensor_none)}</select>
+      <p class="hint">${esc(T.preheat_sensor_hint)}</p></label>`;
   const details = cfg.preheat
     ? `<label class="fld"><span>${esc(T.preheat_max)}</span>
         <div class="row tight"><input type="number" class="inp num" min="${LIMIT.min}" max="${LIMIT.max}" step="15" data-preheat-max value="${limit}"> min</div></label>
-      <label class="fld"><span>${esc(T.preheat_sensor)}</span>
-        <select class="inp" data-preheat-sensor>${options(hass, cfg.temperature_sensor, isTemperature, T.preheat_sensor_none)}</select>
-        <p class="hint">${esc(T.preheat_sensor_hint)}</p></label>
       <div class="fld"><span>${esc(T.preheat_speeds)}</span>${speedRows(hass, T, agenda, cfg)}
         <div><button class="btn sm" data-preheat-reset>${esc(T.preheat_reset)}</button></div></div>`
     : "";
-  sec.innerHTML = `<label class="tgl"><input type="checkbox" data-preheat ${cfg.preheat ? "checked" : ""}><span></span>${esc(T.preheat)}</label>
+  sec.innerHTML = `${sensor}<label class="tgl"><input type="checkbox" data-preheat ${cfg.preheat ? "checked" : ""}><span></span>${esc(T.preheat)}</label>
     <p class="hint">${esc(T.preheat_hint)}</p>${details}`;
   sec.querySelector("[data-preheat]").addEventListener("change", (x) => {
     cfg.preheat = x.target.checked;

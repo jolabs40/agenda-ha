@@ -109,13 +109,19 @@ export function epochOf(m, timeZone) {
   return guess;
 }
 
-/** Measured temperature and setpoint of the first thermostat of each agenda over a day,
- *  from the recorder: {entity_id: [[wall minute, measured, setpoint or null when off], ...]}.
- *  call: a websocket call. */
+const mean = (values) => (values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null);
+
+/** Measured temperature and setpoint of each thermostat agenda over a day, from the recorder:
+ *  {entry_id: [[wall minute, measured, setpoint or null when off], ...]}. Measured is the room
+ *  sensor when one is chosen, else the mean of the thermostats; the setpoint, the mean of those
+ *  that are on. call: a websocket call. */
 export async function climateHistory(call, agendas, day, timeZone) {
-  const ids = [
-    ...new Set(agendas.filter((a) => a.settings.kind === "climate").map((a) => (a.settings.entities || [])[0])),
-  ].filter(Boolean);
+  const climate = agendas.filter((a) => a.settings.kind === "climate" && (a.settings.entities || []).length);
+  const sources = (a) => [
+    ...a.settings.entities,
+    ...(a.settings.temperature_sensor ? [a.settings.temperature_sensor] : []),
+  ];
+  const ids = [...new Set(climate.flatMap(sources))];
   if (!ids.length) return {};
   const res = await call({
     type: "history/history_during_period",
@@ -127,12 +133,26 @@ export async function climateHistory(call, agendas, day, timeZone) {
     significant_changes_only: false,
   });
   const out = {};
-  for (const id of ids) {
-    let attrs = {};
-    out[id] = (res?.[id] || []).map((row) => {
-      if (row.a) attrs = row.a;
-      const on = !["off", "unavailable", "unknown"].includes(row.s);
-      return [wallAt(new Date(row.lu * 1000), timeZone), attrs.current_temperature, on ? attrs.temperature : null];
+  for (const agenda of climate) {
+    const sensor = agenda.settings.temperature_sensor;
+    const rows = sources(agenda)
+      .flatMap((id) => (res?.[id] || []).map((row) => [row.lu, id, row]))
+      .sort((x, y) => x[0] - y[0]);
+    const seen = {};
+    let room = null;
+    out[agenda.entry_id] = rows.map(([lu, id, row]) => {
+      if (id === sensor) room = Number.isFinite(Number(row.s)) && row.s !== "" ? Number(row.s) : null;
+      else seen[id] = { s: row.s, a: row.a || seen[id]?.a || {} };
+      const devices = Object.values(seen);
+      const measured = sensor
+        ? room
+        : mean(devices.map((d) => d.a.current_temperature).filter((t) => typeof t === "number"));
+      // some thermostats give no mode, only a setpoint
+      const on = devices.filter(
+        (d) => !["off", "unavailable"].includes(d.s) && (d.s !== "unknown" || d.a.temperature != null),
+      );
+      const setpoint = mean(on.map((d) => d.a.temperature).filter((t) => typeof t === "number"));
+      return [wallAt(new Date(lu * 1000), timeZone), measured, setpoint];
     });
   }
   return out;
@@ -368,8 +388,14 @@ export function repeatSummary(event, T, hass) {
       else text = n === 1 ? T.every_month_on(what) : T.every_n_months_on(n, what);
       break;
     }
-    default:
-      return T.on_day(fmtDay(start, lang, { weekday: "long", day: "numeric", month: "long" }));
+    default: {
+      // days added by hand or by add_dates
+      const more = (r.include || []).map((d) =>
+        fmtDay(wm(d), lang, { weekday: "short", day: "numeric", month: "short" }),
+      );
+      const day = T.on_day(fmtDay(start, lang, { weekday: "long", day: "numeric", month: "long" }));
+      return more.length ? `${day} · ${T.included} : ${more.join(", ")}` : day;
+    }
   }
   const extra = [];
   if (r.until) extra.push(T.until_day(fmtDay(wm(r.until), lang, { day: "numeric", month: "short", year: "numeric" })));
@@ -469,6 +495,13 @@ export function offSchedule(agenda, T, at) {
     else parts.push(T.by_hand);
   }
   return parts;
+}
+
+/** "Paused", with the time it resumes at when it has one. */
+export function pausedText(agenda, T) {
+  if (!agenda.resume_at) return T.paused;
+  const n = wm(agenda.resume_at);
+  return T.paused_until(fmtDay(n, T._lang, { weekday: "short", day: "numeric", month: "short" }), wall(n).slice(11));
 }
 
 export function loadHaComponents() {

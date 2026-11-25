@@ -13,6 +13,7 @@ const {
   fmtDay,
   groupedRows,
   offSchedule,
+  pausedText,
   repeatSummary,
   splitByDay,
   stack,
@@ -31,6 +32,8 @@ const { preheatBands, preheatNote } = await import(`./agenda-preheat.js${V}`);
 export { liveText };
 
 const pct = (minutes) => `${((minutes / DAY) * 100).toFixed(4)}%`;
+// a paused agenda keeps its blocks, hatched, with this after their label
+const LOCK = `<ha-icon class="lock" icon="mdi:lock-outline"></ha-icon>`;
 const hhmm = (m) => (m === DAY ? "24:00" : wallTime(m));
 // the title of a group of agendas, unless the view is told to go without
 const groupTitle = (ctx, cls) => (ctx.titles === false ? null : (group) => `<div class="${cls}">${esc(group)}</div>`);
@@ -135,10 +138,17 @@ export function renderWeek(ctx) {
     const { agenda, event, occ } = x;
     const color = eventColor(hass, agenda, event);
     const label = eventLabel(hass, agenda, event, T);
-    const tip = [single ? "" : agenda.name, label, T.all_day, x.ghost ? ghostText(occ) : ""].filter(Boolean);
+    const paused = !agenda.enabled;
+    const tip = [
+      single ? "" : agenda.name,
+      label,
+      T.all_day,
+      x.ghost ? ghostText(occ) : "",
+      paused ? pausedText(agenda, T) : "",
+    ].filter(Boolean);
     // a day left aside opens the series, as its ghost in a column does
     const data = x.ghost ? `data-entry="${esc(agenda.entry_id)}" data-ghost="${esc(event.id)}"` : occData(agenda, occ);
-    return `<button class="wk-x ${x.ghost ? "off" : "own"}" ${data} style="--c:${esc(color)};--t:${esc(event.text_color || textColor(color))}" title="${esc(tip.join(" · "))}">${esc(label)}</button>`;
+    return `<button class="wk-x ${x.ghost ? "off" : "own"} ${paused ? "paused" : ""}" ${data} style="--c:${esc(color)};--t:${esc(event.text_color || textColor(color))}" title="${esc(tip.join(" · "))}">${esc(label)}</button>`;
   };
   const head = dayList
     .map((d, i) => {
@@ -276,12 +286,13 @@ export function renderWeek(ctx) {
         // easy to forget once set: a mark on the block
         const acts = (event.start_actions || []).length + (event.end_actions || []).length > 0;
         const icon = eventIcon(agenda, event);
-        html += `<div class="ev ${short ? "short" : ""} ${occ.all_day ? "allday" : ""} ${p.first ? "" : "cont"} ${p.last ? "" : "open"}"
+        const paused = !agenda.enabled;
+        html += `<div class="ev ${short ? "short" : ""} ${occ.all_day ? "allday" : ""} ${p.first ? "" : "cont"} ${p.last ? "" : "open"} ${paused ? "paused" : ""}"
             style="top:${pct(p.from)};height:${pct(h)};left:calc(${indent}% + 2px);z-index:${2 + p.depth};--c:${esc(color)};--t:${esc(tc)};--a:${esc(agenda.settings.color)}"
-            ${occData(agenda, occ)} title="${esc([prefix, eventLabel(hass, agenda, event, T), time, condText(event), acts ? T.with_actions : ""].filter(Boolean).join(" · "))}">
+            ${occData(agenda, occ)} title="${esc([prefix, eventLabel(hass, agenda, event, T), time, condText(event), acts ? T.with_actions : "", paused ? pausedText(agenda, T) : ""].filter(Boolean).join(" · "))}">
           ${icon ? `<ha-icon icon="${esc(icon)}"></ha-icon>` : ""}
           ${acts ? `<ha-icon class="ev-act ${icon ? "beside" : ""}" icon="mdi:cog-play"></ha-icon>` : ""}
-          <div class="ev-main">${esc(main)}</div>
+          <div class="ev-main">${esc(main)}${paused ? LOCK : ""}</div>
           ${short ? "" : `<div class="ev-sub">${esc([prefix, subName, time].filter(Boolean).join(" · "))}</div>${condHtml(event, occ)}`}
           ${editable && !occ.all_day && p.last ? `<div class="ev-resize" data-resize="1"></div>` : ""}
         </div>`;
@@ -372,10 +383,18 @@ export function renderMonth(ctx) {
             ? stateLabel(hass, agenda, event.state, T)
             : eventLabel(hass, agenda, event, T);
         const time = occ.all_day || later ? "" : wallTime(wm(occ.start));
-        const tip = [single ? "" : agenda.name, eventLabel(hass, agenda, event, T), time].filter(Boolean).join(" · ");
+        const paused = !agenda.enabled;
+        const tip = [
+          single ? "" : agenda.name,
+          eventLabel(hass, agenda, event, T),
+          time,
+          paused ? pausedText(agenda, T) : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         const icon = eventIcon(agenda, event);
-        return `<div class="mo-ev" ${occData(agenda, occ)} style="--c:${esc(color)};--t:${esc(textColor(color))}" title="${esc(tip)}">
-          ${time ? `<b>${time}</b>` : ""}<span>${esc(label)}</span>${icon ? `<ha-icon icon="${esc(icon)}"></ha-icon>` : ""}</div>`;
+        return `<div class="mo-ev ${paused ? "paused" : ""}" ${occData(agenda, occ)} style="--c:${esc(color)};--t:${esc(textColor(color))}" title="${esc(tip)}">
+          ${time ? `<b>${time}</b>` : ""}<span>${esc(label)}</span>${paused ? LOCK : ""}${icon ? `<ha-icon icon="${esc(icon)}"></ha-icon>` : ""}</div>`;
       })
       .join("");
     const more =
@@ -453,7 +472,7 @@ export function renderHouse(ctx) {
   const until = isToday ? now : day + DAY;
   let curves = 0;
   const curveOf = (agenda) => {
-    const points = agenda.settings.kind === "climate" && ctx.history?.[(agenda.settings.entities || [])[0]];
+    const points = agenda.settings.kind === "climate" && ctx.history?.[agenda.entry_id];
     const svg = points?.length && day <= now ? climateCurve(points, day, until, from, span) : "";
     if (svg) curves += 1;
     return svg;
@@ -587,7 +606,7 @@ export function renderNext(ctx) {
         <div class="nx-line">${nowChip}${next}</div>
         ${off.length ? `<div class="nx-off"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>${esc(off.join(" · "))}</div>` : ""}
         ${preheatNote(a, T) ? `<div class="nx-pre"><ha-icon icon="mdi:thermometer-chevron-up"></ha-icon>${esc(preheatNote(a, T))}</div>` : ""}
-        ${a.enabled ? "" : `<div class="nx-off">${esc(T.paused)}</div>`}
+        ${a.enabled ? "" : `<div class="nx-off">${esc(pausedText(a, T))}</div>`}
       </div>
       ${buttons ? `<div class="nx-act">${buttons}</div>` : ""}
     </div>`;
@@ -637,8 +656,9 @@ export function renderList(ctx) {
         hasStates(agenda) && agenda.settings.default_state
           ? `<div class="li-default"><span class="sw" style="--c:${esc(stateColor(hass, agenda, agenda.settings.default_state))};--t:#1f1f1f">${esc(stateLabel(hass, agenda, agenda.settings.default_state, T))}</span><small>${esc(T.default_state)}</small></div>`
           : "";
-      return `<section class="ls ${inGroup ? "in" : ""}">
-        <header><span class="dot" style="--c:${esc(agenda.settings.color)}"></span><b>${esc(agenda.name)}</b>${def}</header>
+      const paused = agenda.enabled ? "" : `<span class="ls-paused">${LOCK}${esc(pausedText(agenda, T))}</span>`;
+      return `<section class="ls ${inGroup ? "in" : ""} ${agenda.enabled ? "" : "paused"}">
+        <header><span class="dot" style="--c:${esc(agenda.settings.color)}"></span><b>${esc(agenda.name)}</b>${paused}${def}</header>
         ${rows}
       </section>`;
     },
@@ -723,6 +743,9 @@ export const VIEW_STYLES = `
   .ev.short .ev-main { font-size: 12px; }
   .ev.armed { outline: 2px solid var(--primary-color); outline-offset: 1px; }
   .ev.dragging { opacity: .85; box-shadow: 0 8px 22px rgba(0,0,0,.35); z-index: 50 !important; cursor: grabbing; transition: none; }
+  .ev.paused, .wk-x.own.paused, .mo-ev.paused, .ls.paused .sw {
+    background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--card-background-color, #fff) 35%, transparent) 0 3px, transparent 3px 10px); }
+  .ev .lock { position: static; display: inline-flex; vertical-align: -2px; margin-left: 3px; --mdc-icon-size: 14px; opacity: 1; }
   .ev-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; }
   .ev-resize::after { content: ""; position: absolute; left: 50%; bottom: 2px; width: 18px; margin-left: -9px; height: 3px; border-radius: 2px; background: currentColor; opacity: 0; transition: opacity .15s; }
   .ev:hover .ev-resize::after { opacity: .45; }
@@ -794,6 +817,7 @@ export const VIEW_STYLES = `
   .mo-ev b { font-weight: 600; font-variant-numeric: tabular-nums; flex: none; }
   .mo-ev span { overflow: hidden; text-overflow: ellipsis; }
   .mo-ev ha-icon { --mdc-icon-size: 14px; flex: none; align-self: center; margin-left: auto; opacity: .8; }
+  .mo-ev .lock { margin-left: 0; --mdc-icon-size: 13px; opacity: 1; }
   .mo-more { font-size: 11.5px; color: var(--secondary-text-color); padding: 0 6px; }
   .mo-ev.mo-x { background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--primary-text-color);
     border: 1px dashed color-mix(in srgb, var(--c) 75%, transparent); line-height: 1.35; }
@@ -842,6 +866,8 @@ export const VIEW_STYLES = `
   /* ---- list ---- */
   .ls { padding: 4px 0 12px; }
   .ls header { display: flex; align-items: center; gap: 10px; padding: 10px 8px; font-size: 16px; }
+  .ls-paused { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; font-weight: 500; color: var(--warning-color, #f57c00); }
+  .ls-paused .lock { --mdc-icon-size: 15px; }
   .li-default { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--secondary-text-color); }
   .li { display: grid; grid-template-columns: 96px 1fr auto; align-items: center; gap: 14px; padding: 8px; border-radius: 10px; cursor: pointer; }
   .li:hover { background: var(--agenda-hover); }

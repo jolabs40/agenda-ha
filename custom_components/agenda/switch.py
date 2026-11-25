@@ -8,6 +8,7 @@ from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN, SwitchEntit
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .entity import AgendaEntity
@@ -39,11 +40,18 @@ class AgendaEnabledSwitch(AgendaEntity, SwitchEntity):
     def icon(self) -> str:
         return "mdi:calendar-check" if self.agenda.enabled else "mdi:calendar-lock"
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        resume_at = self.agenda.resume_at
+        return {"resume_at": dt_util.as_local(resume_at).isoformat() if resume_at else None}
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.agenda.async_set_enabled(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.agenda.async_set_enabled(False)
+        # already off, it keeps the time it resumes at
+        if self.agenda.enabled:
+            await self.agenda.async_set_enabled(False)
 
 
 class AbsenceSwitch(SwitchEntity):

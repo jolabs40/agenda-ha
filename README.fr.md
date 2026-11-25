@@ -34,7 +34,8 @@ Les captures sont en anglais ; l'interface s'affiche en français si Home Assist
     l'ouvrir et le réactiver ; le bloc d'un événement qui a des actions porte une petite marque.
   - Mois : les événements de chaque jour, avec les jours fériés et les vacances scolaires.
   - Maison : tous les agendas sur une journée, avec ce que fait chaque appareil en ce moment et,
-    pour les thermostats, la température mesurée tracée sous la consigne.
+    pour les thermostats, la température mesurée tracée sous la consigne. Avec plusieurs
+    thermostats, la température est leur moyenne, ou la sonde de la pièce si l'agenda en a une.
   - Liste : tous les événements et leur répétition.
 - Sur un grand écran, les agendas sont listés dans une colonne, comme dans le panneau Calendrier :
   on coche ceux à afficher, on voit ce que fait chacun et son prochain changement, on le suspend ou
@@ -175,7 +176,8 @@ l'intégration s'affiche à partir de Home Assistant 2026.3.
   sont appelés que si leur état diffère, sauf ceux sans retour d'état : ce qu'ils affichent n'est
   qu'une supposition, ils reçoivent donc toujours leur commande.
 - Les heures sont celles de l'horloge : un événement à 21h30 reste à 21h30 au changement d'heure.
-- Couper l'interrupteur Actif suspend complètement l'agenda.
+- Couper l'interrupteur Actif suspend complètement l'agenda. Depuis le panneau, il demande jusqu'à
+  quand : l'agenda reprend alors seul à cette heure, ou reste suspendu jusqu'à ce qu'on le réactive.
 
 ## Réglages faits à la main
 
@@ -337,7 +339,7 @@ minutes choisi, avant ou après, pour que les lampes ne s'allument pas chaque jo
 | Action | Cible | Données |
 |---|---|---|
 | `agenda.skip_next` | le calendrier d'un agenda | `event` (nom, facultatif) : retire la prochaine occurrence |
-| `agenda.add_dates` | le calendrier d'un agenda | `event`, `dates` : ajoute des occurrences ces jours-là |
+| `agenda.add_dates` | le calendrier d'un agenda | `event`, `dates` : ajoute des occurrences ces jours-là ; sans événement de ce nom, le crée, sur la journée entière |
 | `agenda.remove_dates` | le calendrier d'un agenda | `event`, `dates` : retire les occurrences ces jours-là |
 | `agenda.advance` | le calendrier d'un agenda | applique tout de suite le prochain changement (Passer au suivant) |
 | `agenda.apply_event` | le calendrier d'un agenda | `event` (nom) : applique cet événement jusqu'à la fin de sa prochaine occurrence |

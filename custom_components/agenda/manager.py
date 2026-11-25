@@ -27,7 +27,7 @@ import uuid
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import Context, Event, HomeAssistant, State, callback
+from homeassistant.core import Context, CoreState, Event, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -38,6 +38,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.helpers.script import Script, async_validate_actions_config
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -117,6 +118,9 @@ class Agenda:
         self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
         self.settings["color"] = PALETTE[index % len(PALETTE)]
         self.enabled = True
+        # end of a pause; None while active, or paused until turned back on
+        self.resume_at: datetime | None = None
+        self._unsub_resume: Callable[[], None] | None = None
         self.events: list[dict[str, Any]] = []
         self.next_change: datetime | None = None
         self._last = dt_util.utcnow()
@@ -201,6 +205,8 @@ class Agenda:
             data = migrate(data)
             self.settings.update(data.get("settings") or {})
             self.enabled = data.get("enabled", True)
+            if not self.enabled and data.get("resume_at"):
+                self.resume_at = dt_util.parse_datetime(data["resume_at"])
             self.events = data.get("events") or []
         runtime = await self._runtime.async_load() or {}
         now = dt_util.utcnow()
@@ -226,7 +232,10 @@ class Agenda:
         self.preheater.load(runtime)
 
     async def async_save(self) -> None:
-        await self._store.async_save({"settings": self.settings, "enabled": self.enabled, "events": self.events})
+        data: dict[str, Any] = {"settings": self.settings, "enabled": self.enabled, "events": self.events}
+        if self.resume_at:
+            data["resume_at"] = self.resume_at.isoformat()
+        await self._store.async_save(data)
 
     def runtime_data(self) -> dict[str, Any]:
         override = self.override
@@ -328,6 +337,7 @@ class Agenda:
         self.control.track()
         self.preheater.start()
         self._schedule_holds()
+        self._schedule_resume()
         self._unsub_absence = self.shared.async_on_absence_change(self.async_absence_changed)
         # the last states of the condition entities are written once, when Home Assistant stops
         self._unsub_stop = self.hass.bus.async_listen(EVENT_HOMEASSISTANT_STOP, self._on_ha_stop)
@@ -356,6 +366,40 @@ class Agenda:
         if self._unsub_absence:
             self._unsub_absence()
             self._unsub_absence = None
+        if self._unsub_resume:
+            self._unsub_resume()
+            self._unsub_resume = None
+
+    @callback
+    def _schedule_resume(self) -> None:
+        if self._unsub_resume:
+            self._unsub_resume()
+            self._unsub_resume = None
+        if self.enabled or self.resume_at is None:
+            return
+        if self.hass.state is not CoreState.running and self.resume_at <= dt_util.utcnow():
+            # over while Home Assistant was down: once it has started, devices and calendars back
+            async def _started(_hass: HomeAssistant) -> None:
+                self._unsub_resume = None
+                await self._async_resume()
+
+            self._unsub_resume = async_at_started(self.hass, _started)
+            return
+
+        @callback
+        def _due(_now: datetime) -> None:
+            self._unsub_resume = None
+            self.hass.async_create_task(self._async_resume())
+
+        self._unsub_resume = async_track_point_in_time(self.hass, _due, self.resume_at)
+
+    async def _async_resume(self) -> None:
+        if self.enabled:
+            return
+        if self.condition_calendars() and not self._calendars_ready:
+            await self.async_refresh_calendars(apply=False)
+        _LOGGER.info("Agenda %s: pause over, resumed", self.name)
+        await self.async_set_enabled(True)
 
     @callback
     def _schedule(self) -> None:
@@ -874,14 +918,17 @@ class Agenda:
         self.events = copy.deepcopy(source.events)
         await self.async_save()
 
-    async def async_set_enabled(self, enabled: bool) -> None:
+    async def async_set_enabled(self, enabled: bool, resume_at: datetime | None = None) -> None:
+        """Resume the agenda, or pause it until resume_at (None: until turned back on)."""
         if not enabled:
             # the one command of a suspended agenda: an early setpoint must not stay
             async with self.run_lock:
                 if self.preheater.cancel():
                     await self.async_apply_state(reason=REASON_PREHEAT_CANCEL)
         self.enabled = enabled
+        self.resume_at = None if enabled else resume_at
         await self.async_save()
+        self._schedule_resume()
         if enabled:
             async with self.run_lock:
                 await self.async_apply_state(force=True, reason="enabled")
@@ -1039,7 +1086,12 @@ class Agenda:
         return first.day.isoformat()
 
     async def async_change_dates(self, name: str, days: list[date], add: bool) -> None:
-        """Add occurrences on these days, or remove them (for automations)."""
+        """Add occurrences on these days, or remove them (for automations). Days added to an
+        event the agenda does not have make one, all day."""
+        wanted = (name or "").strip().lower()
+        if add and wanted and days and not any((e.get("name") or "").strip().lower() == wanted for e in self.events):
+            await self.async_save_event(recurrence.day_event(name, days))
+            return
         before, _ = self.desired()
         for event in self._named(name):
             repeat = event.setdefault("repeat", {})
@@ -1106,6 +1158,7 @@ class Agenda:
             "entry_id": self.entry_id,
             "name": self.name,
             "enabled": self.enabled,
+            "resume_at": wall(self.resume_at, self.tz) if self.resume_at else None,
             "settings": self.settings,
             "events": self.events,
             "next_change": wall(self.next_change, self.tz) if self.next_change else None,

@@ -132,6 +132,15 @@ export function climateModes(hass, agenda) {
     .sort((a, b) => rank(a) - rank(b));
 }
 
+/** Whether every linked thermostat can be turned off; some have no off mode (Tuya pilot wire heaters).
+ *  One whose modes are not known yet, unavailable for now, is taken as able to. */
+function canTurnOff(hass, agenda) {
+  return states(hass, agenda).every((s) => {
+    const modes = s.attributes?.hvac_modes;
+    return !Array.isArray(modes) || modes.includes("off");
+  });
+}
+
 /** Preset temperature, for thermostats exposing preset_temperatures (Versatile Thermostat). */
 export function presetTemp(hass, agenda, preset) {
   for (const s of states(hass, agenda)) {
@@ -423,6 +432,20 @@ export function draftState(hass, agenda) {
   }
 }
 
+/** The state outside events of an agenda just given this kind: what an event switched on goes off after it. */
+export const defaultOf = (kind) => (kind === "on_off" ? { type: "off" } : null);
+
+/** The temperature of the room: its sensor when one is chosen, else the mean of the thermostats. */
+function roomTemperature(hass, agenda, list) {
+  const sensor = agenda.settings?.temperature_sensor;
+  if (sensor) {
+    const n = Number(hass?.states?.[sensor]?.state);
+    if (Number.isFinite(n)) return n;
+  }
+  const values = list.map((s) => s.attributes?.current_temperature).filter((t) => typeof t === "number");
+  return values.length ? values.reduce((sum, t) => sum + t, 0) / values.length : null;
+}
+
 /** What the linked devices are doing right now. */
 export function liveText(hass, agenda, T) {
   const list = states(hass, agenda);
@@ -432,13 +455,22 @@ export function liveText(hass, agenda, T) {
   switch (kindOf(agenda)) {
     case "climate": {
       const parts = [];
-      if (typeof a.current_temperature === "number")
-        parts.push(`${fmtNum(Math.round(a.current_temperature * 10) / 10, T)}°`);
-      if (first.state === "off") parts.push(T.off.toLowerCase());
+      const room = roomTemperature(hass, agenda, list);
+      if (room !== null) parts.push(`${fmtNum(Math.round(room * 10) / 10, T)}°`);
+      const on = list.filter((s) => s.state !== "off");
+      if (!on.length) parts.push(T.off.toLowerCase());
       else {
-        // the mode only matters on a device that has several
-        if ((a.hvac_modes || []).length > 2) parts.push(modeName(T, first.state).toLowerCase());
-        if (typeof a.temperature === "number") parts.push(`→ ${fmtNum(a.temperature, T)}°`);
+        // the mode only matters on devices that have several, and some give none
+        const modes = new Set(on.map((s) => s.state));
+        const [mode] = modes;
+        if (modes.size === 1 && mode !== "unknown" && (on[0].attributes?.hvac_modes || []).length > 2)
+          parts.push(modeName(T, mode).toLowerCase());
+        const set = on.map((s) => s.attributes?.temperature).filter((t) => typeof t === "number");
+        if (set.length) {
+          const low = Math.min(...set);
+          const high = Math.max(...set);
+          parts.push(`→ ${fmtNum(low, T)}°${high > low ? `-${fmtNum(high, T)}°` : ""}`);
+        }
       }
       return parts.join(" ");
     }
@@ -563,7 +595,8 @@ export function statePicker(hass, agenda, st, T, { allowNone, noneLabel }) {
     }
     if (rich)
       html += chip("mode", T.no_setpoint, MODE_COLORS[st?.hvac_mode] || MODE_COLORS.fan_only, st?.type === "mode");
-    html += chip("off", T.off, OFF_COLOR, st?.type === "off");
+    // still shown when it is the state, to be changed
+    if (st?.type === "off" || canTurnOff(hass, agenda)) html += chip("off", T.off, OFF_COLOR, st?.type === "off");
     if (isTemp) {
       extra = bigValue({
         value: temp,

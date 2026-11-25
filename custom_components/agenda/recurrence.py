@@ -221,6 +221,44 @@ def validate_event(event: dict[str, Any]) -> None:
         raise ValueError("the repetition ends before it starts")
 
 
+def day_event(name: str, days: Iterable[date]) -> dict[str, Any]:
+    """An all-day event on these days, without a state, as the panel saves one: the first day
+    starts it, the others are added to it."""
+    first, *others = sorted(set(days))
+    return {
+        "name": name.strip(),
+        "icon": None,
+        "color": None,
+        "text_color": None,
+        "enabled": True,
+        "all_day": True,
+        "start": first.isoformat(),
+        "end": (first + timedelta(days=1)).isoformat(),
+        "repeat": {
+            "freq": FREQ_NONE,
+            "interval": 1,
+            "weekdays": [],
+            "until": None,
+            "exclude": [],
+            "include": [day.isoformat() for day in others],
+            "holidays": HOLIDAYS_IGNORE,
+            "calendars": [],
+            "calendar_mode": CALENDAR_EXCLUDE,
+            "calendar_match": CALENDAR_ANY,
+            "period": PERIOD_ALWAYS,
+            "monthly": MONTHLY_DAY,
+            "weeks": WEEKS_ALL,
+        },
+        "state": None,
+        "start_actions": [],
+        "end_actions": [],
+        "note": "",
+        "start_sun": None,
+        "end_sun": None,
+        "conditions": [],
+    }
+
+
 def _monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
 

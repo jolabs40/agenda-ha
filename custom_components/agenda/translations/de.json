@@ -19,7 +19,12 @@
   "entity": {
     "switch": {
       "enabled": {
-        "name": "Aktiv"
+        "name": "Aktiv",
+        "state_attributes": {
+          "resume_at": {
+            "name": "Fortsetzung"
+          }
+        }
       },
       "absence": {
         "name": "Abwesenheitsmodus"
@@ -73,7 +78,7 @@
     },
     "add_dates": {
       "name": "Daten hinzufügen",
-      "description": "Fügt an diesen Tagen Termine hinzu, zusätzlich zur Wiederholung.",
+      "description": "Fügt an diesen Tagen Termine hinzu, zusätzlich zur Wiederholung. Gibt es keinen Termin mit diesem Namen, wird er ganztägig angelegt.",
       "fields": {
         "event": {
           "name": "Termin",

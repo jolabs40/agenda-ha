@@ -19,7 +19,12 @@
   "entity": {
     "switch": {
       "enabled": {
-        "name": "Actif"
+        "name": "Actif",
+        "state_attributes": {
+          "resume_at": {
+            "name": "Reprise"
+          }
+        }
       },
       "absence": {
         "name": "Mode absence"
@@ -73,7 +78,7 @@
     },
     "add_dates": {
       "name": "Ajouter des dates",
-      "description": "Ajoute des occurrences d'un événement ces jours-là, en plus de sa répétition.",
+      "description": "Ajoute des occurrences d'un événement ces jours-là, en plus de sa répétition. Sans événement de ce nom, il est créé, sur la journée entière.",
       "fields": {
         "event": {
           "name": "Événement",

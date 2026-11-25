@@ -30,7 +30,8 @@ agenda goes back to its default state.
     and turned back on; the block of an event with actions carries a small mark.
   - Month: each day's events, with public and school holidays.
   - House: every agenda over one day, with what each device is doing now and, for thermostats, the
-    measured temperature drawn under the setpoint.
+    measured temperature drawn under the setpoint. With several thermostats, the temperature is their
+    mean, or the Room temperature sensor when the agenda has one.
   - List: all events and how they repeat.
 - On a wide screen the agendas are listed in a column, as in the Calendar panel: tick the ones to
   show, see what each one is doing and its next change, pause it or open its settings. On a phone,
@@ -163,7 +164,8 @@ integration icon shows from Home Assistant 2026.3.
   state differs, except devices without state feedback: what they show is only a guess, so they
   always get their command.
 - Times are local clock times: an event at 21:30 stays at 21:30 when daylight saving time changes.
-- Turning the Active switch off pauses the agenda completely.
+- Turning the Active switch off pauses the agenda completely. From the panel it asks until when:
+  the agenda then resumes by itself at that time, or stays paused until turned back on.
 
 ## Changes made by hand
 
@@ -314,7 +316,7 @@ minutes, earlier or later, so lights do not go on at the same time every day.
 | Action | Target | Data |
 |---|---|---|
 | `agenda.skip_next` | an agenda's calendar | `event` (optional name): removes the next occurrence |
-| `agenda.add_dates` | an agenda's calendar | `event`, `dates`: adds occurrences on these days |
+| `agenda.add_dates` | an agenda's calendar | `event`, `dates`: adds occurrences on these days; without an event of that name, makes one, all day |
 | `agenda.remove_dates` | an agenda's calendar | `event`, `dates`: removes the occurrences on these days |
 | `agenda.advance` | an agenda's calendar | applies the next change now (Skip to next) |
 | `agenda.apply_event` | an agenda's calendar | `event` (name): applies that event until the end of its next occurrence |
